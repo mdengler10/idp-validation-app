@@ -2,6 +2,8 @@
 
 This document is for teammates continuing work on the AssistRx / MuleSoft IDP accuracy testing app.
 
+**Reusing this app for a different customer (new docs / doc types)?** Start with **[ADAPTING.md](./ADAPTING.md)** — what to keep, what to strip, and a file-by-file checklist.
+
 ## What this app is
 
 A small **FastAPI + SQLite** web app that:
@@ -139,16 +141,26 @@ That project splits packets, classifies pages, calls the same IDP actions, and w
 
 Field mapping reference in Mule: `EnrollmentPatientMap.dwl`, `InsuranceCopayMap.dwl`.
 
+## Adapting beyond AssistRx
+
+See **[ADAPTING.md](./ADAPTING.md)** for the full guide. Short version:
+
+- **Keep:** compare, normalize, IDP client, runs/overrides, SQLite, generic extract-edit UI  
+- **Replace:** `assistrx_profiles.py` (org, actions, field keys, `PROFILES`), extract branches in `assistrx_extract.py`, suite page titles/categories in `suite.html` / `index.html`  
+- **Fresh DB** per customer (`data/` or `IDP_VALIDATION_DB=...`) so AssistRx ground truth is not mixed in  
+
 ## Suggested next iterations
 
 Priority ideas for a teammate:
 
-1. **Add more suite PDFs** via `PROFILES` as forms become available
-2. **Batch “run all with GT”** button on `/suite` (upload folder or re-run stored files)
-3. **Export CSV/JSON** of last scores for stakeholder reports
-4. **Optional Mule webhook** — POST packet `enrollmentExtraction` into `/api/suite/...` without re-uploading PDF
-5. **Tighten field lists per form** — some enrollment forms don’t fill every Master_Prompt key; per-profile `field_keys` subsets reduce noise
-6. **Tests** — unit tests for `assistrx_extract.extract_from_idp_body` and `compare.compare_fields` with fixture JSON
+1. **Add more suite PDFs** via `PROFILES` as forms become available (same customer)
+2. **Port the suite to another customer** using [ADAPTING.md](./ADAPTING.md)
+3. **Batch “run all with GT”** button on `/suite` (upload folder or re-run stored files)
+4. **Export CSV/JSON** of last scores for stakeholder reports
+5. **Optional Mule webhook** — POST packet `enrollmentExtraction` into `/api/suite/...` without re-uploading PDF
+6. **Tighten field lists per form** — some enrollment forms don’t fill every Master_Prompt key; per-profile `field_keys` subsets reduce noise
+7. **Tests** — unit tests for `assistrx_extract.extract_from_idp_body` and `compare.compare_fields` with fixture JSON
+8. **Config-driven profiles** (YAML/env) so swapping customers does not require editing Python module names
 
 ## Ops notes
 

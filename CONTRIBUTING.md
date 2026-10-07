@@ -1,5 +1,7 @@
 # Contributing
 
+**New customer / different document types?** Follow [ADAPTING.md](./ADAPTING.md) before renaming modules or wiping AssistRx profiles.
+
 ## Dev setup
 
 ```bash

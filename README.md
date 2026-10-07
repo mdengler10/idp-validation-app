@@ -6,9 +6,12 @@ Built for the AssistRx enrollment POC: compare what IDP pulls from enrollment fo
 
 ## For teammates
 
-Start here: **[HANDOFF.md](./HANDOFF.md)** — architecture, suite workflow, how to add documents, and suggested next work.
-
-Also see [REQUIREMENTS.md](./REQUIREMENTS.md) (product requirements) and [CONTRIBUTING.md](./CONTRIBUTING.md).
+| Doc | Read when… |
+|-----|------------|
+| **[HANDOFF.md](./HANDOFF.md)** | Running the AssistRx suite, architecture, day-to-day workflow |
+| **[ADAPTING.md](./ADAPTING.md)** | Reusing this app for **another customer** (new docs / doc types) — keep core, replace suite pack |
+| [CONTRIBUTING.md](./CONTRIBUTING.md) | Small PRs, adding documents within a suite |
+| [REQUIREMENTS.md](./REQUIREMENTS.md) | Original REQ-1 / REQ-2 product requirements |
 
 ## Requirements
 
