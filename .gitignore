@@ -1,0 +1,25 @@
+# Database, logs, and runtime data (may contain local IDP credentials)
+data/
+*.db
+logs/
+
+# Secrets / env
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

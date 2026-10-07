@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ profile.name }} – Test Suite</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    .status-bar { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+    .status-pill { padding: 8px 14px; border-radius: var(--radius-sm); background: var(--bg-input); border: 1px solid var(--border); font-size: 0.875rem; }
+    .split-view { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; margin-top: 20px; }
+    @media (max-width: 900px) { .split-view { grid-template-columns: 1fr; } }
+    .doc-panel { background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; min-height: 400px; }
+    .doc-panel iframe { width: 100%; height: 520px; border: none; border-radius: var(--radius-sm); }
+    .fields-panel { background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; max-height: 560px; overflow-y: auto; }
+    .field-row { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+    .field-row label { min-width: 160px; font-size: 0.8125rem; font-family: monospace; color: var(--text-muted); word-break: break-all; }
+    .field-row input { flex: 1; min-width: 120px; padding: 6px 10px; font-size: 0.875rem; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+    .action-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; align-items: center; }
+    .config-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+    .config-grid label { display: block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px; }
+    .config-grid input, .config-grid select { width: 100%; padding: 6px 8px; font-size: 0.875rem; }
+  </style>
+</head>
+<body>
+  <div class="app-wrap">
+    <h1>{{ profile.name }}</h1>
+    <p class="subtitle">{{ profile.category | capitalize }} · {{ profile.brand | capitalize }} · Action {{ profile.idp.action_version }}</p>
+    <nav class="nav">
+      <a href="/suite">← Test Suite</a>
+      <a href="/runs">Runs</a>
+      <a href="/saved-ground-truth">Saved Ground Truth</a>
+    </nav>
+
+    <div class="status-bar">
+      <div class="status-pill">
+        Ground truth:
+        {% if ground_truth %}<strong style="color: var(--success);">Saved</strong>{% else %}<strong style="color: #d29922;">Not set</strong>{% endif %}
+      </div>
+      {% if aggregate and aggregate.run_count > 0 and aggregate.avg_pct is not none %}
+      <div class="status-pill">
+        Avg <strong>{{ aggregate.run_count }}</strong> runs: <strong>{{ aggregate.avg_pct }}%</strong>
+        <span class="badge {{ 'pass' if aggregate.avg_pct >= 90 else 'fail' }}">{{ 'Pass' if aggregate.avg_pct >= 90 else 'Fail' }}</span>
+        {% if aggregate.pass_count is defined %}({{ aggregate.pass_count }}/{{ aggregate.run_count }} runs ≥90%){% endif %}
+        {% if aggregate.min_pct is not none and aggregate.max_pct is not none %}
+        · range {{ aggregate.min_pct }}–{{ aggregate.max_pct }}%
+        {% endif %}
+      </div>
+      {% endif %}
+      {% if latest and latest.pct is not none %}
+      <div class="status-pill">
+        Last run: <strong>{{ latest.pct }}%</strong>
+        <span class="badge {{ 'pass' if latest.pass else 'fail' }}">{{ 'Pass' if latest.pass else 'Fail' }}</span>
+        ({{ latest.score }}/{{ latest.total_fields }}) · <a href="/runs/{{ latest.run_id }}">View</a>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <div class="card-header">1. IDP credentials &amp; document</div>
+      <p style="font-size: 0.875rem; color: var(--text-muted); margin: 0 0 12px 0;">Action settings are pre-filled for this document type. Save Client ID/Secret once — they persist across sessions.</p>
+      <div class="config-grid" id="configGrid">
+        <div><label>Platform</label><select id="platform"><option value="production">Production (US)</option><option value="staging">Staging</option><option value="eu">EU</option></select></div>
+        <div><label>Region</label><input type="text" id="region" value="{{ profile.idp.region }}"></div>
+        <div><label>Organization ID</label><input type="text" id="org_id" value="{{ profile.idp.org_id }}"></div>
+        <div><label>Action ID</label><input type="text" id="action_id" value="{{ profile.idp.action_id }}"></div>
+        <div><label>Version</label><input type="text" id="action_version" value="{{ profile.idp.action_version }}"></div>
+        <div><label>Client ID</label><input type="text" id="client_id" placeholder="Connected App client ID"></div>
+        <div><label>Client Secret</label><input type="password" id="client_secret" placeholder="Connected App secret"></div>
+      </div>
+      <div class="form-row" style="margin-top: 16px;">
+        <label for="docFile">PDF or image</label>
+        <input type="file" id="docFile" accept=".pdf,image/*">
+      </div>
+      <div id="statusBox" style="min-height: 32px; margin: 12px 0; font-size: 0.9375rem;"></div>
+      <div class="action-row">
+        <button type="button" class="btn btn-ghost" id="showTemplateBtn">Show field template</button>
+        <button type="button" class="btn btn-primary" id="extractBtn">Extract from IDP</button>
+        <button type="button" class="btn btn-ghost" id="saveGtBtn" disabled>Save ground truth</button>
+        <button type="button" class="btn btn-primary" id="runTestBtn" disabled>Run test (compare to ground truth)</button>
+      </div>
+    </div>
+
+    <div class="split-view" id="resultSection" style="display: none;">
+      <div class="doc-panel">
+        <p id="docPlaceholder" class="placeholder" style="color: var(--text-muted);">Document preview</p>
+        <iframe id="docFrame" style="display: none;" title="Document"></iframe>
+      </div>
+      <div>
+        <div class="fields-panel" id="fieldsList"></div>
+      </div>
+    </div>
+
+    <p id="actionMsg" style="margin-top: 16px; min-height: 24px;"></p>
+  </div>
+
+  <script>
+    window.PROFILE_ID = "{{ profile.id }}";
+    window.PROFILE_DOCUMENT_ID = "{{ profile.document_id }}";
+    window.HAS_GROUND_TRUTH = {% if has_ground_truth %}true{% else %}false{% endif %};
+    window.EXISTING_GT = {{ gt_fields_json | safe }};
+    window.FIELD_KEYS = {{ field_keys_json | safe }};
+
+    function tryParseJsonObject(str) {
+      if (typeof str !== 'string') return null;
+      var s = str.trim();
+      if (s.indexOf('{') !== 0) return null;
+      var candidates = [s];
+      if (s.slice(-2) === '}}') candidates.push(s.slice(0, -1));
+      for (var ci = 0; ci < candidates.length; ci++) {
+        try {
+          var p = JSON.parse(candidates[ci]);
+          if (p && typeof p === 'object' && !Array.isArray(p)) return p;
+        } catch (e) {}
+      }
+      return null;
+    }
+
+    function looksLikeEnrollmentSchema(obj) {
+      if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false;
+      var keys = Object.keys(obj);
+      var markers = ['patient_name', 'date_of_birth', 'address', 'provider_name', 'member_id', 'primary_phone'];
+      var hits = 0;
+      for (var i = 0; i < markers.length; i++) {
+        if (keys.indexOf(markers[i]) >= 0) hits++;
+      }
+      return hits >= 2;
+    }
+
+    function isIdpMetaFieldKey(key) {
+      var parts = (key || '').split('.');
+      var meta = ['confidencescore', 'confidence_score', 'geometry', 'text', 'answer', 'displayvalue'];
+      for (var i = 1; i < parts.length; i++) {
+        if (meta.indexOf(parts[i].toLowerCase()) >= 0) return true;
+      }
+      return false;
+    }
+
+    function canonicalFieldKey(key) {
+      var k = (key || '').trim();
+      if (isIdpMetaFieldKey(k)) return '';
+      var prefixes = ['fields.Master_Prompt.', 'Master_Prompt.', 'fields.master_prompt.', 'master_prompt.', 'value.'];
+      var changed = true;
+      while (changed) {
+        changed = false;
+        for (var i = 0; i < prefixes.length; i++) {
+          if (k.indexOf(prefixes[i]) === 0) {
+            k = k.slice(prefixes[i].length);
+            changed = true;
+            break;
+          }
+        }
+      }
+      if (k.indexOf('fields.') === 0) k = k.slice('fields.'.length);
+      if (k.indexOf('.') >= 0) {
+        var parts = k.split('.');
+        if (parts[parts.length - 1].toLowerCase() === 'value' && parts.length > 1) {
+          k = parts.slice(0, -1).join('.');
+        }
+        var head = k.split('.')[0].toLowerCase();
+        if (head === 'section_1' || head === 'section_2' || head === 'section_3' ||
+            head === 'section_4' || head === 'section_5' || head === 'section_6' ||
+            head === 'fields' || head === 'master_prompt') {
+          k = k.split('.').pop();
+        }
+      }
+      return k;
+    }
+
+    function isEnrollmentBlobKey(key) {
+      var lk = (key || '').toLowerCase();
+      return lk === 'master_prompt' || lk === 'fields.master_prompt' || lk === 'value';
+    }
+
+    function isMasterPromptKey(key) {
+      return isEnrollmentBlobKey(key);
+    }
+
+    function expandMasterPromptValue(raw) {
+      var mp = raw;
+      if (typeof mp === 'string') mp = tryParseJsonObject(mp);
+      if (mp && typeof mp === 'object' && !Array.isArray(mp) && 'value' in mp && Object.keys(mp).length <= 3) {
+        mp = mp.value;
+        if (typeof mp === 'string') mp = tryParseJsonObject(mp);
+      }
+      if (mp && typeof mp === 'object' && !Array.isArray(mp)) return mp;
+      return null;
+    }
+
+    function expandMasterPromptInMap(fields) {
+      var out = {};
+      Object.keys(fields || {}).forEach(function(k) {
+        var v = fields[k];
+        var wrapped = (v && typeof v === 'object' && 'value' in v) ? v : { value: v };
+        var raw = wrapped.value;
+        if (isEnrollmentBlobKey(k)) {
+          var mp = expandMasterPromptValue(raw);
+          if (mp && looksLikeEnrollmentSchema(mp)) {
+            Object.keys(mp).forEach(function(pk) {
+              var pv = mp[pk];
+              if (pv && typeof pv === 'object' && 'value' in pv) pv = pv.value;
+              var ck = canonicalFieldKey(pk);
+              if (ck) out[ck] = { value: pv };
+            });
+            return;
+          }
+        }
+        if (typeof raw === 'string') {
+          var parsed = tryParseJsonObject(raw);
+          if (parsed && (parsed.patient_name != null || parsed.address != null || parsed.provider_name != null)) {
+            Object.keys(parsed).forEach(function(pk) {
+              var ck = canonicalFieldKey(pk);
+              if (ck) out[ck] = { value: parsed[pk] };
+            });
+            return;
+          }
+        }
+        var canon = canonicalFieldKey(k);
+        if (canon && !isMasterPromptKey(canon)) out[canon] = wrapped;
+      });
+      return out;
+    }
+
+    function fieldLabel(key) {
+      return canonicalFieldKey(key);
+    }
+
+    function normalizeFieldsMap(fields) {
+      var raw = fields || {};
+      var expanded = expandMasterPromptInMap(raw);
+      var out = {};
+      Object.keys(expanded || {}).forEach(function(k) {
+        var v = expanded[k];
+        var canon = canonicalFieldKey(k);
+        if (!canon || isEnrollmentBlobKey(canon)) return;
+        out[canon] = (v && typeof v === 'object' && 'value' in v) ? v : { value: v };
+      });
+      if (Object.keys(out).length === 0 && Object.keys(raw).length) {
+        Object.keys(raw).forEach(function(k) {
+          var canon = canonicalFieldKey(k);
+          if (!canon || isEnrollmentBlobKey(canon)) return;
+          var v = raw[k];
+          out[canon] = (v && typeof v === 'object' && 'value' in v) ? v : { value: v };
+        });
+      }
+      return out;
+    }
+
+    function fieldsFromExtractResponse(data) {
+      var raw = null;
+      if (data && data.extracted_fields && typeof data.extracted_fields === 'object') {
+        raw = data.extracted_fields;
+      } else if (data && data.body_normalized && typeof data.body_normalized === 'object') {
+        raw = getFieldsFromBody(data.body_normalized);
+      } else {
+        raw = getFieldsFromBody((data && data.body) ? data.body : data);
+      }
+      return normalizeFieldsMap(raw || {});
+    }
+
+    function renderFields(fields) {
+      fields = normalizeFieldsMap(fields);
+      var container = document.getElementById('fieldsList');
+      container.innerHTML = '';
+      var keys = Object.keys(fields).sort();
+      if (keys.length === 0) {
+        container.innerHTML = '<p style="color:var(--text-muted);font-size:0.875rem;">No fields extracted.</p>';
+        return;
+      }
+      keys.forEach(function(key) {
+        var val = fields[key];
+        var str = (val && typeof val === 'object' && 'value' in val) ? (val.value == null ? '' : String(val.value)) : (val != null ? String(val) : '');
+        var row = document.createElement('div');
+        row.className = 'field-row';
+        row.innerHTML = '<label title="' + key.replace(/"/g, '&quot;') + '">' + fieldLabel(key) + '</label><input type="text" data-key="' + key.replace(/"/g, '&quot;') + '" value="' + str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;') + '">';
+        container.appendChild(row);
+      });
+    }
+
+    function formatIdpError(data, httpStatus) {
+      data = data || {};
+      var msg = data.error || data.detail || data.status || ('HTTP ' + (httpStatus || ''));
+      if (data.request_id) msg += ' — request_id: ' + data.request_id;
+      if (data.log_file) msg += ' — log: ' + data.log_file;
+      return msg;
+    }
+
+    function gatherFields() {
+      var fields = {};
+      document.querySelectorAll('#fieldsList input[data-key]').forEach(function(inp) {
+        var key = inp.getAttribute('data-key');
+        if (key) fields[key] = { value: inp.value === '' ? null : inp.value };
+      });
+      return fields;
+    }
+
+    function unwrapIdpVal(v) {
+      if (v == null) return null;
+      if (typeof v === 'object' && v.answer && typeof v.answer === 'object' && 'value' in v.answer) return v.answer.value;
+      if (typeof v === 'object' && 'value' in v) return v.value;
+      return v;
+    }
+
+    function hasVal(v) {
+      if (v == null) return false;
+      if (typeof v === 'string') {
+        var s = v.trim();
+        if (!s) return false;
+        var u = s.toUpperCase();
+        if (u === 'NOT FOUND' || u === 'NONE' || u === 'N/A') return true;
+        return true;
+      }
+      return true;
+    }
+
+    function getFieldsFromBody(body) {
+      if (!body || typeof body !== 'object') return {};
+      var out = {};
+      function put(key, val) {
+        var lk = (key || '').toLowerCase();
+        var u = unwrapIdpVal(val);
+        if (lk === 'master_prompt' || lk === 'value') {
+          var mp = expandMasterPromptValue(u);
+          if (mp && looksLikeEnrollmentSchema(mp)) {
+            Object.keys(mp).forEach(function(pk) { put(pk, mp[pk]); });
+            return;
+          }
+        }
+        var canon = canonicalFieldKey(key);
+        if (!canon || isEnrollmentBlobKey(canon)) return;
+        if (!hasVal(u) && u !== 'None' && u !== 'Not Found') return;
+        var existing = out[canon];
+        if (existing && hasVal(existing.value) && !hasVal(u)) return;
+        out[canon] = { value: u };
+      }
+      function ingestFieldsMap(f) {
+        if (!f || typeof f !== 'object') return;
+        if (Array.isArray(f)) {
+          f.forEach(function(item) {
+            if (!item || typeof item !== 'object') return;
+            var name = item.name || item.fieldName || item.key || item.id;
+            if (name != null) put(name, item.value != null ? item.value : item);
+          });
+          return;
+        }
+        Object.keys(f).forEach(function(k) {
+          var v = f[k];
+          if (v && typeof v === 'object' && 'value' in v) {
+            var inner = v.value;
+            if (typeof inner === 'string' && inner.trim().indexOf('{') === 0) {
+              try {
+                var parsed = JSON.parse(inner);
+                if (parsed && typeof parsed === 'object') {
+                  if (isMasterPromptKey(k)) {
+                    Object.keys(parsed).forEach(function(pk) { put(pk, parsed[pk]); });
+                  } else {
+                    Object.keys(parsed).forEach(function(pk) { put(pk, parsed[pk]); });
+                  }
+                  return;
+                }
+              } catch (e) {}
+            }
+            if (isMasterPromptKey(k)) {
+              var mp = expandMasterPromptValue(inner);
+              if (mp) {
+                Object.keys(mp).forEach(function(pk) { put(pk, mp[pk]); });
+                return;
+              }
+            }
+            put(k, v.value);
+          } else if (typeof v === 'string' && v.trim().indexOf('{') === 0) {
+            try {
+              var parsed = JSON.parse(v);
+              if (parsed && typeof parsed === 'object') {
+                Object.keys(parsed).forEach(function(pk) { put(pk, parsed[pk]); });
+                return;
+              }
+            } catch (e) {}
+            put(k, v);
+          } else {
+            put(k, v);
+          }
+        });
+      }
+      function ingestPrompts(p) {
+        if (!p || typeof p !== 'object') return;
+        Object.keys(p).forEach(function(k) {
+          if (k.toLowerCase() === 'master_prompt') {
+            var mp = unwrapIdpVal(p[k]);
+            if (typeof mp === 'string' && mp.trim().indexOf('{') === 0) {
+              try { mp = JSON.parse(mp); } catch (e) { mp = null; }
+            }
+            if (mp && typeof mp === 'object') Object.keys(mp).forEach(function(pk) { put(pk, mp[pk]); });
+            return;
+          }
+          put(k, p[k]);
+        });
+      }
+      function walk(node, depth) {
+        if (!node || typeof node !== 'object' || depth > 8) return;
+        ingestFieldsMap(node.fields);
+        ingestPrompts(node.prompts);
+        ['extractionResult', 'extractionResults', 'fieldResults'].forEach(function(k) {
+          if (Array.isArray(node[k])) ingestFieldsMap(node[k]);
+        });
+        if (Array.isArray(node.pages)) {
+          node.pages.forEach(function(page) {
+            if (page && typeof page === 'object') ingestFieldsMap(page.fields);
+          });
+        }
+        if (Array.isArray(node.documents) && node.documents[0]) walk(node.documents[0], depth + 1);
+        if (Array.isArray(node.results) && node.results[0]) walk(node.results[0], depth + 1);
+        ['result', 'execution', 'output', 'data'].forEach(function(k) {
+          if (node[k] && typeof node[k] === 'object') walk(node[k], depth + 1);
+        });
+      }
+      walk(body, 0);
+      return out;
+    }
+
+    async function loadCreds() {
+      try {
+        var r = await fetch('/api/settings/idp-credentials');
+        var c = await r.json();
+        if (c.client_id) document.getElementById('client_id').value = c.client_id;
+        if (c.client_secret) document.getElementById('client_secret').value = c.client_secret;
+        // Keep profile platform/org/action from the page — do not overwrite with saved staging creds.
+      } catch (e) {}
+    }
+
+    function formDataForIdp(file) {
+      var fd = new FormData();
+      fd.append('file', file);
+      fd.append('document_id', window.PROFILE_DOCUMENT_ID || '');
+      fd.append('platform', document.getElementById('platform').value);
+      fd.append('region', document.getElementById('region').value.trim());
+      fd.append('org_id', document.getElementById('org_id').value.trim());
+      fd.append('action_id', document.getElementById('action_id').value.trim());
+      fd.append('action_version', document.getElementById('action_version').value.trim());
+      fd.append('client_id', document.getElementById('client_id').value.trim());
+      fd.append('client_secret', document.getElementById('client_secret').value.trim());
+      return fd;
+    }
+
+    var currentFile = null;
+
+    function renderEmptyTemplate() {
+      var fields = {};
+      (window.FIELD_KEYS || []).forEach(function(k) { fields[k] = { value: '' }; });
+      renderFields(fields);
+      document.getElementById('resultSection').style.display = 'grid';
+      document.getElementById('saveGtBtn').disabled = false;
+    }
+
+    function getSelectedFile() {
+      if (currentFile) return currentFile;
+      var fileInput = document.getElementById('docFile');
+      return fileInput.files.length ? fileInput.files[0] : null;
+    }
+
+    document.getElementById('showTemplateBtn').onclick = function() {
+      renderEmptyTemplate();
+      document.getElementById('statusBox').textContent = 'Field template loaded — fill correct values manually, or use Extract from IDP to pre-fill.';
+      document.getElementById('statusBox').style.color = 'var(--text-muted)';
+    };
+
+    document.getElementById('extractBtn').onclick = async function() {
+      var status = document.getElementById('statusBox');
+      var fileInput = document.getElementById('docFile');
+      if (!fileInput.files.length) {
+        status.textContent = 'Choose a PDF or image first.';
+        status.style.color = 'var(--error)';
+        return;
+      }
+      currentFile = fileInput.files[0];
+      status.textContent = 'Sending to IDP…';
+      status.style.color = 'var(--text-muted)';
+      this.disabled = true;
+      try {
+        var r = await fetch('/api/idp/extract', { method: 'POST', body: formDataForIdp(currentFile) });
+        var data = await r.json().catch(function() { return { error: 'Invalid JSON response' }; });
+        if (!r.ok || (!data.ok && !(data.body && typeof data.body === 'object'))) {
+          status.textContent = 'Error: ' + formatIdpError(data, r.status);
+          status.style.color = 'var(--error)';
+          return;
+        }
+        var fields = fieldsFromExtractResponse(data);
+        renderFields(fields);
+        document.getElementById('resultSection').style.display = 'grid';
+        document.getElementById('saveGtBtn').disabled = false;
+        document.getElementById('runTestBtn').disabled = !window.HAS_GROUND_TRUTH;
+        var frame = document.getElementById('docFrame');
+        var ph = document.getElementById('docPlaceholder');
+        if (currentFile.type.indexOf('pdf') >= 0 || currentFile.type.indexOf('image') >= 0) {
+          ph.style.display = 'none';
+          frame.style.display = 'block';
+          frame.src = URL.createObjectURL(currentFile);
+        }
+        var n = Object.keys(normalizeFieldsMap(fields)).length;
+        if (n === 0) {
+          status.textContent = 'Extraction finished but no enrollment fields were parsed. Check logs or try again.';
+          status.style.color = '#d29922';
+        } else {
+          status.textContent = 'Extraction complete (' + n + ' fields). Edit if needed, then save ground truth or run test.';
+          status.style.color = 'var(--success)';
+        }
+      } catch (err) {
+        status.textContent = 'Error: ' + (err.message || err);
+        status.style.color = 'var(--error)';
+      } finally {
+        this.disabled = false;
+      }
+    };
+
+    document.getElementById('saveGtBtn').onclick = async function() {
+      var msg = document.getElementById('actionMsg');
+      msg.textContent = 'Saving ground truth…';
+      msg.style.color = 'var(--text-muted)';
+      var fd = new FormData();
+      fd.append('fields_json', JSON.stringify(gatherFields()));
+      try {
+        var r = await fetch('/api/suite/profiles/' + window.PROFILE_ID + '/ground-truth', { method: 'POST', body: fd });
+        var data = await r.json();
+        if (!r.ok) throw new Error(data.detail || data.error || 'Save failed');
+        window.HAS_GROUND_TRUTH = true;
+        document.getElementById('runTestBtn').disabled = !getSelectedFile();
+        msg.innerHTML = 'Ground truth saved. <a href="/suite">Back to suite</a> or run a test with the same file.';
+        msg.style.color = 'var(--success)';
+      } catch (err) {
+        msg.textContent = 'Error: ' + (err.message || err);
+        msg.style.color = 'var(--error)';
+      }
+    };
+
+    document.getElementById('runTestBtn').onclick = async function() {
+      if (!window.HAS_GROUND_TRUTH) {
+        document.getElementById('actionMsg').textContent = 'Save ground truth first.';
+        return;
+      }
+      var file = getSelectedFile();
+      if (!file) {
+        document.getElementById('actionMsg').textContent = 'Choose the PDF/image to test (same document as ground truth).';
+        return;
+      }
+      currentFile = file;
+      var msg = document.getElementById('actionMsg');
+      msg.textContent = 'Running IDP + compare…';
+      msg.style.color = 'var(--text-muted)';
+      this.disabled = true;
+      try {
+        var testFd = formDataForIdp(currentFile);
+        var gathered = gatherFields();
+        if (Object.keys(gathered).length) {
+          testFd.append('fields_json', JSON.stringify(gathered));
+        }
+        var r = await fetch('/api/suite/profiles/' + window.PROFILE_ID + '/run-test', { method: 'POST', body: testFd });
+        var data = await r.json();
+        if (!data.ok) throw new Error(data.error || 'Test failed');
+        if (data.idp_body || data.extracted_fields) {
+          var fields = fieldsFromExtractResponse({ body: data.idp_body, extracted_fields: data.extracted_fields });
+          renderFields(fields);
+          document.getElementById('resultSection').style.display = 'grid';
+        }
+        var meaningful = (data.meaningful_pct != null) ? data.meaningful_pct : 0;
+        var passLabel = data.effective_pass ? 'Pass' : 'Fail';
+        var passClass = data.effective_pass ? 'pass' : 'fail';
+        var headline = '<span class="badge ' + passClass + '">' + passLabel + '</span> <strong>' + data.pct + '%</strong> (' + data.score + '/' + data.total_fields + ' fields, need 90%+)';
+        if (data.meaningful_score != null && data.meaningful_score !== data.score) {
+          headline += ' — <strong>' + meaningful + '%</strong> meaningful (' + data.meaningful_score + ' fields with real values)';
+        }
+        if (data.null_actual_count === data.total_fields || (data.meaningful_score === 0 && data.score > 0)) {
+          headline += '. <span style="color:var(--error)">IDP returned no values; matches on &quot;None&quot;/&quot;Not Found&quot; only.</span>';
+        }
+        msg.innerHTML = headline + ' <a href="/runs/' + data.run_id + '">View details</a> · <a href="/suite">Suite dashboard</a>';
+        msg.style.color = data.effective_pass ? 'var(--success)' : 'var(--error)';
+      } catch (err) {
+        var detail = err.message || err;
+        msg.textContent = 'Error: ' + detail;
+        msg.style.color = 'var(--error)';
+      } finally {
+        this.disabled = false;
+      }
+    };
+
+    loadCreds();
+    document.getElementById('docFile').addEventListener('change', function() {
+      if (window.HAS_GROUND_TRUTH && this.files.length) {
+        document.getElementById('runTestBtn').disabled = false;
+      }
+    });
+    if (window.EXISTING_GT && Object.keys(window.EXISTING_GT).length) {
+      renderFields(window.EXISTING_GT);
+      document.getElementById('resultSection').style.display = 'grid';
+      document.getElementById('saveGtBtn').disabled = false;
+      document.getElementById('runTestBtn').disabled = !window.HAS_GROUND_TRUTH;
+    } else if ((window.FIELD_KEYS || []).length) {
+      renderEmptyTemplate();
+    }
+  </script>
+</body>
+</html>

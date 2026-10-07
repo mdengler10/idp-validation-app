@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Upload Form – IDP Validation</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    .upload-form-card { max-width: 720px; }
+    .upload-form-card .form-row input[type="text"], .upload-form-card .form-row input[type="password"] { max-width: 100%; }
+    .upload-form-card select { max-width: 100%; padding: 8px 12px; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); }
+    .response-area {
+      margin-top: 20px;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 16px;
+      font-family: "SF Mono", Monaco, monospace;
+      font-size: 0.8125rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .response-area.empty { color: var(--text-muted); }
+    .copy-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+    .hint { font-size: 0.8125rem; color: var(--text-muted); margin-top: 4px; }
+    .where-card { margin-top: 24px; }
+    .where-card summary { cursor: pointer; font-weight: 600; color: var(--accent); }
+    .where-card ul { margin: 8px 0 0 0; padding-left: 20px; }
+    .where-card li { margin-bottom: 6px; font-size: 0.9375rem; }
+  </style>
+</head>
+<body>
+  <div class="app-wrap">
+    <h1>Upload Form</h1>
+    <p class="subtitle">Send a form to your MuleSoft IDP Document Action. Response JSON appears below with a Copy button. If you see "No URL configured", restart the app server and hard-refresh this page.</p>
+    <nav class="nav">
+      <a href="/">Home</a>
+      <a href="/runs">Runs</a>
+      <a href="/runs/new">New run</a>
+      <a href="/expected">Expected data</a>
+      <a href="/extract-edit">Extract &amp; Edit</a>
+    </nav>
+
+    <div class="card upload-form-card">
+      <div class="card-header">Send form to IDP Document Action</div>
+      <form id="uploadForm">
+        <div class="form-row">
+          <label for="platform">Platform (domain)</label>
+          <select id="platform" name="platform">
+            <option value="production">Production (US) – anypoint.mulesoft.com</option>
+            <option value="staging">Staging (US) – stgx.anypoint.mulesoft.com</option>
+            <option value="eu">EU – eu1.anypoint.mulesoft.com</option>
+          </select>
+          <span class="hint">Use <strong>Staging</strong> if you log in at stgx.anypoint.mulesoft.com. No URL to type — we use this to build the right endpoints.</span>
+        </div>
+        <div class="form-row">
+          <label for="region">Region</label>
+          <input type="text" id="region" name="region" placeholder="e.g. us-east-1" required>
+          <span class="hint">US: use us-east-1. EU control plane with Platform=EU: use eu1.</span>
+        </div>
+        <div class="form-row">
+          <label for="org_id">Organization ID</label>
+          <input type="text" id="org_id" name="org_id" placeholder="Anypoint organization (business group) ID" required>
+        </div>
+        <div class="form-row">
+          <label for="action_id">Action ID</label>
+          <input type="text" id="action_id" name="action_id" placeholder="Document Action ID (from Exchange asset)" required>
+        </div>
+        <div class="form-row">
+          <label for="action_version">Version</label>
+          <input type="text" id="action_version" name="action_version" placeholder="e.g. 1.0.0" required>
+          <span class="hint">Change when you publish a new version (e.g. 1.0.0 → 1.1.0).</span>
+        </div>
+        <div class="form-row">
+          <label for="client_id">Client ID</label>
+          <input type="text" id="client_id" name="client_id" placeholder="Connected App client ID">
+          <span class="hint">Or set IDP_CLIENT_ID in the environment.</span>
+        </div>
+        <div class="form-row">
+          <label for="client_secret">Client Secret</label>
+          <input type="password" id="client_secret" name="client_secret" placeholder="Connected App client secret">
+          <span class="hint">Or set IDP_CLIENT_SECRET in the environment. Save credentials to store on the server (persists across refreshes and all sessions); shared with Extract & Edit.</span>
+        </div>
+        <div class="form-row">
+          <label for="callback_url">Callback URL (optional)</label>
+          <input type="url" id="callback_url" name="callback_url" placeholder="https://your-endpoint.com/idp-callback">
+          <span class="hint">If set, IDP will POST to this URL when the execution finishes (no auth). Useful when polling is slow or you run behind a firewall.</span>
+        </div>
+        <div class="form-row">
+          <label for="file">Form file (PDF, image, etc.)</label>
+          <input type="file" id="file" name="file" accept=".pdf,.png,.jpg,.jpeg,.tiff,.tif" required>
+        </div>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+          <button type="submit" class="btn btn-primary">Send</button>
+          <button type="button" class="btn btn-ghost" id="saveCredsBtn">Save credentials</button>
+          <span id="saveCredsMsg" style="font-size: 0.875rem; color: var(--text-muted);"></span>
+        </div>
+      </form>
+      <p id="statusMsg" style="margin-top: 12px; font-size: 0.9375rem; min-height: 24px;"></p>
+
+      <div class="card where-card" style="margin-top: 20px; background: var(--bg-input);">
+        <details>
+          <summary>Where to find these in Anypoint Platform</summary>
+          <ul>
+            <li><strong>Platform (domain)</strong> – Choose <strong>Staging (US)</strong> if your org is on the staging environment and you log in at <code>https://stgx.anypoint.mulesoft.com</code>. Choose <strong>Production (US)</strong> for <code>anypoint.mulesoft.com</code>, or <strong>EU</strong> for <code>eu1.anypoint.mulesoft.com</code>. This is the “URL” — we use it to call the right token and IDP endpoints; you don’t type a URL.</li>
+            <li><strong>Region</strong> – If you use Production or Staging (US), use <code>us-east-1</code>. If you use EU platform, use <code>eu1</code>.</li>
+            <li><strong>Organization ID</strong> – <strong>Access Management</strong> → <strong>Business Groups</strong> → select your group → <strong>Settings</strong> tab shows the Business Group ID. Or open <strong>API Manager</strong> and check the URL: the value after <code>organizations/</code> is your Org ID (e.g. <code>4500658a-7637-4fcf-bc7d-51d1feb28edb</code>).</li>
+            <li><strong>Action ID</strong> – After you <strong>publish</strong> a Document Action from IDP, it appears in <strong>Anypoint Exchange</strong> as an API. Open that asset in Exchange; the API specification or asset details show the action ID (a UUID). You can also open the API in the API portal and use the endpoint path: <code>.../actions/<strong>{actionId}</strong>/versions/...</code>.</li>
+            <li><strong>Version</strong> – The version you set when publishing (e.g. <code>1.0.0</code>). Shown in the IDP publish dialog and in the Exchange asset. Update this field when you republish with a new version.</li>
+            <li><strong>Client ID &amp; Client Secret</strong> – Must come from a <strong>Connected App</strong> with scope "Execute Published Actions" (see below). The Client ID/Secret on the main Access Management screen are <em>organization</em> API credentials, not the same — IDP requires a Connected App (see "Do I need a Connected App?" below for steps). To create one: <strong>Access Management</strong> → <strong>Connected Apps</strong> → <strong>Create App</strong>; name it, choose type <strong>“App acts on its own behalf (client credentials)”</strong>, add scope <strong>“Execute Published Actions”</strong>, save. Copy the <strong>Client ID</strong> and <strong>Client Secret</strong> (you must be at the root organization to see Connected Apps).</li>
+          </ul>
+        </details>
+      </div>
+
+      <div class="card where-card" style="margin-top: 16px; background: var(--bg-input);">
+        <details>
+          <summary>Do I need a Connected App? How to create one for IDP</summary>
+          <p style="margin: 8px 0 0 0;">Yes. The IDP API requires a <strong>Connected App</strong> with the scope <strong>Execute Published Actions</strong>. The credentials on the main Access Management page are for your organization's general API access; they are not the same as a Connected App. Follow these steps (you need <strong>Organization Administrator</strong> or similar):</p>
+          <ol style="margin: 12px 0 0 0; padding-left: 20px;">
+            <li>Log in to Anypoint Platform (e.g. <code>https://stgx.anypoint.mulesoft.com</code> for Staging).</li>
+            <li>Go to <strong>Access Management</strong> → <strong>Connected Apps</strong>. (If you don't see it, you may need to be at the <strong>root organization</strong> — switch business group to the top-level org.)</li>
+            <li>Click <strong>Create App</strong> and enter a name (e.g. "IDP Validation App").</li>
+            <li>For <strong>Type</strong>, select <strong>App acts on its own behalf (client credentials)</strong>.</li>
+            <li>Click <strong>Add Scopes</strong>. In the scopes list, search for or select <strong>Execute Published Actions</strong> (under IDP). Click <strong>Add Scopes</strong>, then apply to the business groups/environments you need and click <strong>Next</strong> until you can click <strong>Save</strong>.</li>
+            <li>After saving, the app shows a <strong>Client ID</strong> and <strong>Client Secret</strong>. Copy both and paste them into the form above (or use <strong>Save credentials</strong> to store them in this browser).</li>
+          </ol>
+        </details>
+      </div>
+    </div>
+
+    <div class="card" id="responseCard" style="display: none;">
+      <div class="card-header">IDP response</div>
+      <div class="copy-row">
+        <button type="button" class="btn btn-ghost btn-sm" id="copyBtn">Copy JSON</button>
+      </div>
+      <pre id="responseArea" class="response-area empty">Response will appear here after you click Send.</pre>
+    </div>
+  </div>
+  <script>
+    var CREDS_KEY = 'idp_upload_credentials';
+    function setFormFromCreds(c) {
+      if (!c) return;
+      if (c.platform) document.getElementById('platform').value = c.platform;
+      if (c.region) document.getElementById('region').value = c.region;
+      if (c.org_id) document.getElementById('org_id').value = c.org_id;
+      if (c.action_id) document.getElementById('action_id').value = c.action_id;
+      if (c.action_version) document.getElementById('action_version').value = c.action_version;
+      if (c.client_id) document.getElementById('client_id').value = c.client_id;
+      if (c.client_secret) document.getElementById('client_secret').value = c.client_secret;
+    }
+    function loadCredentials() {
+      fetch('/api/settings/idp-credentials').then(function(r) {
+        if (!r.ok) throw new Error('Server ' + r.status);
+        return r.json();
+      }).then(function(c) {
+        if (c && (c.region || c.org_id || c.client_id)) {
+          setFormFromCreds(c);
+          document.getElementById('saveCredsMsg').textContent = 'Credentials loaded (saved on server; persist across refreshes and sessions).';
+        } else {
+          try {
+            var s = localStorage.getItem(CREDS_KEY);
+            if (s) { setFormFromCreds(JSON.parse(s)); document.getElementById('saveCredsMsg').textContent = 'Loaded from this browser (save to store on server).'; }
+          } catch (e) {}
+        }
+      }).catch(function() {
+        try {
+          var s = localStorage.getItem(CREDS_KEY);
+          if (s) setFormFromCreds(JSON.parse(s));
+        } catch (e) {}
+      });
+    }
+    loadCredentials();
+
+    document.getElementById('saveCredsBtn').onclick = function() {
+      var c = {
+        platform: document.getElementById('platform').value,
+        region: document.getElementById('region').value.trim(),
+        org_id: document.getElementById('org_id').value.trim(),
+        action_id: document.getElementById('action_id').value.trim(),
+        action_version: document.getElementById('action_version').value.trim(),
+        client_id: document.getElementById('client_id').value.trim(),
+        client_secret: document.getElementById('client_secret').value.trim()
+      };
+      localStorage.setItem(CREDS_KEY, JSON.stringify(c));
+      var fd = new FormData();
+      fd.append('platform', c.platform || 'production');
+      fd.append('region', c.region);
+      fd.append('org_id', c.org_id);
+      fd.append('action_id', c.action_id);
+      fd.append('action_version', c.action_version);
+      fd.append('client_id', c.client_id);
+      fd.append('client_secret', c.client_secret);
+      fetch('/api/settings/idp-credentials', { method: 'POST', body: fd }).then(function(r) {
+        var msg = document.getElementById('saveCredsMsg');
+        if (r.ok) {
+          msg.textContent = 'Saved on server (persists across all sessions).';
+          msg.style.color = 'var(--success)';
+          setTimeout(function() { msg.textContent = ''; }, 4000);
+        } else {
+          r.text().then(function(t) { msg.textContent = 'Save failed: ' + (t || r.status); msg.style.color = 'var(--error)'; });
+        }
+      }).catch(function(err) {
+        document.getElementById('saveCredsMsg').textContent = 'Save failed: ' + (err.message || 'network error');
+        document.getElementById('saveCredsMsg').style.color = 'var(--error)';
+      });
+    };
+
+    document.getElementById('uploadForm').onsubmit = async (e) => {
+      e.preventDefault();
+      var msg = document.getElementById('statusMsg');
+      var fileInput = document.getElementById('file');
+      if (!fileInput.files || !fileInput.files.length) {
+        msg.textContent = 'Choose a file.';
+        msg.style.color = 'var(--error)';
+        return;
+      }
+      msg.textContent = 'Sending…';
+      msg.style.color = 'var(--text-muted)';
+      var fd = new FormData();
+      var platformEl = document.getElementById('platform');
+      var platformVal = (platformEl && platformEl.value) ? platformEl.value : 'production';
+      fd.append('platform', platformVal);
+      fd.append('file', fileInput.files[0]);
+      fd.append('region', document.getElementById('region').value.trim());
+      fd.append('org_id', document.getElementById('org_id').value.trim());
+      fd.append('action_id', document.getElementById('action_id').value.trim());
+      fd.append('action_version', document.getElementById('action_version').value.trim());
+      fd.append('client_id', document.getElementById('client_id').value.trim());
+      fd.append('client_secret', document.getElementById('client_secret').value.trim());
+      var callbackEl = document.getElementById('callback_url');
+      if (callbackEl && callbackEl.value.trim()) fd.append('callback_url', callbackEl.value.trim());
+
+      var controller = new AbortController();
+      var timeoutId = setTimeout(function() { controller.abort(); }, 420000);
+      var statusIntervalId = setInterval(function() {
+        msg.textContent = 'Waiting for IDP… (this can take up to 5 minutes)';
+      }, 10000);
+
+      var pre = document.getElementById('responseArea');
+      var card = document.getElementById('responseCard');
+      try {
+        var r = await fetch('/api/idp/extract', { method: 'POST', body: fd, signal: controller.signal });
+        var data = await r.json().catch(function() { return { ok: false, error: 'Invalid response' }; });
+        card.style.display = 'block';
+        if (data.error) {
+          pre.textContent = data.error;
+          pre.classList.add('empty');
+          msg.textContent = 'Error: ' + data.error;
+          msg.style.color = 'var(--error)';
+        } else {
+          var body = data.body != null ? data.body : data;
+          pre.textContent = JSON.stringify(body, null, 2);
+          pre.classList.remove('empty');
+          msg.textContent = data.ok ? 'Done.' : (data.status ? 'Status: ' + data.status : 'Request returned status ' + (data.status_code || ''));
+          msg.style.color = data.ok ? 'var(--success)' : 'var(--error)';
+        }
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          card.style.display = 'block';
+          pre.textContent = 'Request timed out (browser stopped waiting after ~7 min). The server may still be processing. Do a hard refresh (Ctrl+Shift+R or Cmd+Shift+R) to load the latest app, then try again. If it still times out, check the terminal for the server response.';
+          pre.classList.add('empty');
+          msg.textContent = 'Request timed out.';
+          msg.style.color = 'var(--error)';
+        } else {
+          msg.textContent = 'Error: ' + (err.message || String(err));
+          msg.style.color = 'var(--error)';
+        }
+      } finally {
+        clearTimeout(timeoutId);
+        clearInterval(statusIntervalId);
+      }
+    };
+
+    document.getElementById('copyBtn').onclick = function() {
+      var pre = document.getElementById('responseArea');
+      if (!pre || !pre.textContent) return;
+      navigator.clipboard.writeText(pre.textContent).then(function() {
+        var btn = document.getElementById('copyBtn');
+        var t = btn.textContent;
+        btn.textContent = 'Copied';
+        setTimeout(function() { btn.textContent = t; }, 1500);
+      });
+    };
+  </script>
+</body>
+</html>

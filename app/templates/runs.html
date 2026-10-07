@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Runs – IDP Validation</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app-wrap">
+    <h1>Runs</h1>
+    <p class="subtitle">Each run shows % fields correct. <strong>Pass</strong> = {{ pass_threshold_pct }}% or higher; below that is <strong>Fail</strong>. Click a row for field-by-field detail.</p>
+    <nav class="nav">
+      <a href="/">Home</a>
+      <a href="/runs/new">New run</a>
+      <a href="/extract-edit">Extract & Edit</a>
+    </nav>
+
+    {% if all_time and all_time.total_fields > 0 %}
+    <div class="card run-summary" style="margin-bottom: 20px;">
+      <div class="card-header">All-time (across all runs)</div>
+      <span class="stat">Total fields: <strong>{{ all_time.total_fields }}</strong></span>
+      <span class="stat">Right: <strong style="color: var(--success);">{{ all_time.right }}</strong></span>
+      <span class="stat">Wrong: <strong style="color: var(--error);">{{ all_time.wrong }}</strong></span>
+      <span class="stat">% correct: <strong>{{ all_time.pct }}%</strong></span>
+    </div>
+    {% endif %}
+
+    {% if runs_with_rate %}
+    <div class="runs-table-wrap">
+      <table class="runs-table">
+        <thead>
+          <tr>
+            <th>Run</th>
+            <th>Label</th>
+            <th>Date</th>
+            <th>Accuracy</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in runs_with_rate %}
+          <tr onclick="window.location.href='/runs/{{ item.run.id }}'" onkeydown="if (event.key==='Enter'||event.key===' ') { event.preventDefault(); window.location.href='/runs/{{ item.run.id }}'; }" role="link" tabindex="0">
+            <td><span class="run-id">#{{ item.run.id }}</span></td>
+            <td>
+              <span class="run-label-text">{{ item.run.label or '—' }}</span>
+              <button type="button" class="btn btn-ghost btn-sm rename-run-btn" data-run-id="{{ item.run.id }}" onclick="event.stopPropagation();" title="Rename this run">Rename</button>
+            </td>
+            <td>{% if item.run.created_at %}{{ item.run.created_at.strftime('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}</td>
+            <td>
+              {% if item.success_rate is not none %}
+              <span class="success-rate {{ 'pass' if item.run_pass else 'fail' }}">{{ item.success_rate }}%</span>
+              <span class="badge {{ 'pass' if item.run_pass else 'fail' }}" style="margin-left: 6px;">{{ 'Pass' if item.run_pass else 'Fail' }}</span>
+              {% else %}
+              <span class="success-rate empty">—</span>
+              {% endif %}
+            </td>
+            <td onclick="event.stopPropagation();">
+              <button type="button" class="btn btn-ghost btn-sm btn-danger delete-run-btn" data-run-id="{{ item.run.id }}" data-label="{{ item.run.label or ('#' ~ item.run.id|string) }}">Delete</button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="card empty-state">
+      <p>No runs yet.</p>
+      <a href="/runs/new" class="btn btn-primary">Create a run</a>
+    </div>
+    {% endif %}
+
+    <p style="margin-top: 24px;">
+      <button type="button" class="btn btn-ghost btn-danger" id="resetBtn">Reset all stats</button>
+      {% if undo_available %}
+      <span style="margin-left: 12px;">Reset complete.</span>
+      <button type="button" class="btn btn-primary" id="undoBtn" style="margin-left: 8px;">Undo</button>
+      {% endif %}
+    </p>
+  </div>
+  <script>
+    document.getElementById('resetBtn').onclick = async () => {
+      if (!confirm('Are you sure you want to reset all runs? This will delete all runs, results, and overrides. The running tally will be cleared. Expected data will be kept.')) return;
+      if (!confirm('Confirm again: click OK one more time to permanently reset everything.')) return;
+      const r = await fetch('/api/reset', { method: 'POST' });
+      if (r.ok) location.reload();
+      else alert('Reset failed');
+    };
+    var undoBtn = document.getElementById('undoBtn');
+    if (undoBtn) {
+      undoBtn.onclick = async () => {
+        const r = await fetch('/api/undo', { method: 'POST' });
+        if (r.ok) location.reload();
+        else alert('Undo failed');
+      };
+    }
+    document.querySelectorAll('.delete-run-btn').forEach(btn => {
+      btn.onclick = async () => {
+        const id = btn.dataset.runId, label = btn.dataset.label;
+        if (!confirm('Delete run ' + label + '? This cannot be undone.')) return;
+        const r = await fetch('/api/runs/' + id, { method: 'DELETE' });
+        if (r.ok) location.reload();
+        else alert('Delete failed');
+      };
+    });
+    document.querySelectorAll('.rename-run-btn').forEach(btn => {
+      btn.onclick = async (e) => {
+        e.stopPropagation();
+        const id = btn.dataset.runId;
+        const span = btn.closest('td').querySelector('.run-label-text');
+        let current = span ? span.textContent.trim() : '';
+        if (current === '—') current = '';
+        const next = prompt('Run name (label):', current);
+        if (next === null) return;
+        const r = await fetch('/api/runs/' + id, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label: next }),
+        });
+        if (r.ok) location.reload();
+        else {
+          const t = await r.text();
+          alert('Could not save label: ' + t);
+        }
+      };
+    });
+  </script>
+</body>
+</html>

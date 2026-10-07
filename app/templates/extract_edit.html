@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Extract & Edit – IDP Validation</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    .extract-edit-card { max-width: 900px; }
+    .extract-edit-card .form-row input[type="text"], .extract-edit-card input[type="password"], .extract-edit-card select { max-width: 100%; }
+    .split-view { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; margin-top: 20px; align-items: start; }
+    @media (max-width: 900px) { .split-view { grid-template-columns: 1fr; } }
+    .doc-panel { background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; min-height: 600px; display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; min-width: 0; }
+    .doc-panel .doc-viewer-wrap { width: 100%; height: 100%; min-height: 700px; }
+    .doc-zoom-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-shrink: 0; }
+    .doc-zoom-toolbar .zoom-label { font-size: 0.875rem; color: var(--text-muted); min-width: 3.5em; text-align: center; }
+    .doc-zoom-wrap { overflow: auto; width: 100%; min-width: 0; flex: 1; min-height: 600px; height: 700px; border-radius: var(--radius-sm); }
+    .doc-zoom-sizer { position: relative; }
+    .doc-zoom-scaled { transform-origin: 0 0; }
+    .doc-zoom-scaled iframe, .doc-zoom-scaled object, .doc-zoom-scaled embed { display: block; width: 100%; height: 100%; border: none; border-radius: var(--radius-sm); }
+    .doc-panel .placeholder { color: var(--text-muted); font-size: 0.9375rem; padding: 20px; }
+    .fields-panel { background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; max-height: 600px; overflow-y: auto; }
+    .field-row { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+    .field-row label { min-width: 200px; font-size: 0.8125rem; font-family: monospace; color: var(--text-muted); word-break: break-all; }
+    .field-row input { flex: 1; min-width: 120px; padding: 6px 10px; font-size: 0.875rem; }
+    .save-row { margin-top: 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .save-row input { padding: 8px 12px; font-size: 1rem; }
+    .hint { font-size: 0.8125rem; color: var(--text-muted); margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <div class="app-wrap">
+    <h1>Extract & Edit</h1>
+    <p class="subtitle">Upload a document, extract via IDP, then correct the values on the right and save as ground truth. You can load saved documents into the Expected field on the New run page.</p>
+    <nav class="nav">
+      <a href="/">Home</a>
+      <a href="/saved-ground-truth">Saved Ground Truth</a>
+      <a href="/runs">Runs</a>
+      <a href="/runs/new">New run</a>
+      <a href="/expected">Expected data</a>
+      <a href="/upload-form">Upload Form</a>
+    </nav>
+
+    <div class="card extract-edit-card" id="configCard">
+      <div class="card-header">1. IDP config &amp; upload PDF or image</div>
+      <p style="margin: 0 0 16px 0; font-size: 0.875rem; color: var(--text-muted);">This page is for <strong>PDF enrollment forms (or images)</strong>. OAuth Client ID/Secret are saved <strong>per platform</strong> (Production vs Staging). For Vyvgart suite runs you need <strong>Production (US)</strong> credentials from a Connected App in your production org — staging secrets will return 401.</p>
+      <p id="credsHint" style="margin: 0 0 12px 0; font-size: 0.875rem; color: var(--success); display: none;"></p>
+      <div id="configForm">
+        <div class="form-row">
+          <label for="platform">Platform</label>
+          <select id="platform" name="platform">
+            <option value="production">Production (US)</option>
+            <option value="staging">Staging (US)</option>
+            <option value="eu">EU</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label for="region">Region</label>
+          <input type="text" id="region" name="region" placeholder="e.g. us-east-1">
+        </div>
+        <div class="form-row">
+          <label for="org_id">Organization ID</label>
+          <input type="text" id="org_id" name="org_id" placeholder="Same as Upload Form">
+        </div>
+        <div class="form-row">
+          <label for="action_id">Action ID</label>
+          <input type="text" id="action_id" name="action_id" placeholder="Same as Upload Form">
+        </div>
+        <div class="form-row">
+          <label for="action_version">Version</label>
+          <input type="text" id="action_version" name="action_version" placeholder="e.g. 1.0.0">
+        </div>
+        <div class="form-row">
+          <label for="client_id">Client ID</label>
+          <input type="text" id="client_id" name="client_id" placeholder="Same as Upload Form">
+        </div>
+        <div class="form-row">
+          <label for="client_secret">Client Secret</label>
+          <input type="password" id="client_secret" name="client_secret" placeholder="Same as Upload Form">
+          <div style="margin-top: 6px;">
+            <button type="button" class="btn btn-ghost btn-sm" id="saveCredsBtn">Save credentials (use on both pages)</button>
+            <span id="saveCredsMsg" style="font-size: 0.8125rem; color: var(--text-muted); margin-left: 8px;"></span>
+          </div>
+        </div>
+        <div class="form-row">
+          <label for="docFile">Document (PDF enrollment form or image)</label>
+          <input type="file" id="docFile" name="file">
+        </div>
+        <div id="extractStatusBox" style="min-height: 48px; padding: 12px; margin: 12px 0; background: var(--bg-input); border-radius: var(--radius-sm); border: 1px solid var(--border); font-size: 0.9375rem;"></div>
+        <button type="button" class="btn btn-primary" id="extractBtn">Extract</button>
+      </div>
+    </div>
+    <!-- Inline JS below: use ASCII straight quotes in string literals. Do not paste Unicode curly/smart quotes (U+201C/U+201D/U+2018) inside JS strings — they break parsing and can prevent save handlers from running. -->
+    <script>
+      (function(){
+        var _currentFile = null, _currentBody = null;
+        window._runExtractImpl = async function() {
+          var statusBox = document.getElementById('extractStatusBox');
+          var btn = document.getElementById('extractBtn');
+          try {
+            var region = document.getElementById('region').value.trim();
+            var orgId = document.getElementById('org_id').value.trim();
+            var actionId = document.getElementById('action_id').value.trim();
+            var actionVersion = document.getElementById('action_version').value.trim();
+            var fileInput = document.getElementById('docFile');
+            if (!region || !orgId || !actionId || !actionVersion) {
+              if (statusBox) { statusBox.textContent = 'Please fill in Region, Organization ID, Action ID, and Version.'; statusBox.style.color = 'var(--error)'; }
+              if (btn) { btn.disabled = false; btn.textContent = 'Extract'; }
+              return;
+            }
+            if (!fileInput || !fileInput.files || !fileInput.files.length) {
+              if (statusBox) { statusBox.textContent = 'Choose a document (PDF or image).'; statusBox.style.color = 'var(--error)'; }
+              if (btn) { btn.disabled = false; btn.textContent = 'Extract'; }
+              return;
+            }
+            _currentFile = fileInput.files[0];
+            var fd = new FormData();
+            fd.append('platform', document.getElementById('platform').value);
+            fd.append('file', _currentFile);
+            fd.append('region', region);
+            fd.append('org_id', orgId);
+            fd.append('action_id', actionId);
+            fd.append('action_version', actionVersion);
+            fd.append('client_id', document.getElementById('client_id').value.trim());
+            fd.append('client_secret', document.getElementById('client_secret').value.trim());
+            var r = await fetch('/api/idp/extract', { method: 'POST', body: fd });
+            var data = await r.json().catch(function() { return {}; });
+            var status = (data.status || '').toUpperCase();
+            var hasResult = data.body && typeof data.body === 'object';
+            var showResult = data.ok || (hasResult && (status === 'MANUAL_VALIDATION_REQUIRED' || status === 'PARTIAL_SUCCESS'));
+            if (!showResult) {
+              if (statusBox) { statusBox.textContent = 'Error: ' + (data.error || data.status || ('HTTP ' + r.status)); statusBox.style.color = 'var(--error)'; }
+              if (btn) { btn.disabled = false; btn.textContent = 'Extract'; }
+              return;
+            }
+            _currentBody = data.body || data;
+            if (!_currentBody || typeof _currentBody !== 'object') _currentBody = data;
+            if (status === 'MANUAL_VALIDATION_REQUIRED' || status === 'PARTIAL_SUCCESS') {
+              if (statusBox) { statusBox.textContent = 'Extraction complete (manual validation required). Edit the fields below and click "Save as ground truth" when ready.'; statusBox.style.color = 'var(--success)'; }
+            } else if (status !== 'SUCCEEDED') {
+              if (statusBox) { statusBox.textContent = 'IDP returned status: ' + status + '. You can still edit and save below.'; statusBox.style.color = 'var(--text-muted)'; }
+            } else {
+              if (statusBox) { statusBox.textContent = 'Done. Edit the fields on the right and click "Save as ground truth" when ready.'; statusBox.style.color = 'var(--success)'; }
+            }
+            document.getElementById('resultCard').style.display = 'block';
+            document.getElementById('resultCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            var docPlaceholder = document.getElementById('docPlaceholder');
+            var docFrame = document.getElementById('docFrame');
+            var docZoomToolbar = document.getElementById('docZoomToolbar');
+            var docZoomWrap = document.getElementById('docZoomWrap');
+            if (_currentFile && _currentFile.type.indexOf('pdf') >= 0) {
+              docPlaceholder.style.display = 'none';
+              if (docZoomToolbar) docZoomToolbar.style.display = 'flex';
+              if (docZoomWrap) docZoomWrap.style.display = 'block';
+              docFrame.style.display = 'block';
+              docFrame.src = URL.createObjectURL(_currentFile) + '#toolbar=0&navpanes=0';
+              if (window._docZoomReset) window._docZoomReset();
+              setTimeout(function() { if (window._docZoomApply) window._docZoomApply(); }, 50);
+            } else if (_currentFile && _currentFile.type.indexOf('image') >= 0) {
+              docPlaceholder.style.display = 'none';
+              if (docZoomToolbar) docZoomToolbar.style.display = 'flex';
+              if (docZoomWrap) docZoomWrap.style.display = 'block';
+              docFrame.style.display = 'block';
+              docFrame.src = URL.createObjectURL(_currentFile);
+              if (window._docZoomReset) window._docZoomReset();
+              setTimeout(function() { if (window._docZoomApply) window._docZoomApply(); }, 50);
+            } else {
+              docPlaceholder.textContent = 'Document: ' + (_currentBody.documentName || _currentFile.name);
+              docPlaceholder.style.display = 'block';
+              if (docZoomToolbar) docZoomToolbar.style.display = 'none';
+              if (docZoomWrap) docZoomWrap.style.display = 'none';
+              docFrame.style.display = 'none';
+            }
+            function flattenNestedFieldsToValueMap(obj, prefix) {
+              prefix = prefix || '';
+              var out = {};
+              if (obj === null || obj === undefined) return out;
+              if (typeof obj !== 'object' || Array.isArray(obj)) {
+                if (prefix) out[prefix] = { value: obj };
+                return out;
+              }
+              var keys = Object.keys(obj);
+              if (keys.length === 1 && keys[0] === 'value') {
+                var inner = obj.value;
+                if (inner !== null && typeof inner === 'object' && !Array.isArray(inner) && (Object.keys(inner).length !== 1 || !('value' in inner))) {
+                  var sub = flattenNestedFieldsToValueMap(inner, prefix);
+                  for (var sk in sub) { if (sub.hasOwnProperty(sk)) out[sk] = sub[sk]; }
+                } else {
+                  if (prefix) out[prefix] = { value: inner };
+                }
+                return out;
+              }
+              for (var i = 0; i < keys.length; i++) {
+                var k = keys[i];
+                var v = obj[k];
+                var p = prefix ? prefix + '.' + k : k;
+                if (v !== null && typeof v === 'object' && !Array.isArray(v) && (Object.keys(v).length !== 1 || !('value' in v))) {
+                  var sub = flattenNestedFieldsToValueMap(v, p);
+                  for (var sk in sub) { if (sub.hasOwnProperty(sk)) out[sk] = sub[sk]; }
+                } else {
+                  if (v !== null && typeof v === 'object' && v !== null && Object.keys(v).length === 1 && 'value' in v && typeof v.value === 'object' && v.value !== null && !Array.isArray(v.value)) {
+                    var subInner = flattenNestedFieldsToValueMap(v.value, p);
+                    for (var sk in subInner) { if (subInner.hasOwnProperty(sk)) out[sk] = subInner[sk]; }
+                  } else {
+                    var val = (v !== null && typeof v === 'object' && v !== null && 'value' in v) ? v : { value: v };
+                    out[p] = val;
+                  }
+                }
+              }
+              return out;
+            }
+            function tryParseJsonObject(str) {
+              if (typeof str !== 'string' || str.trim().indexOf('{') !== 0) return null;
+              try {
+                var p = JSON.parse(str);
+                return (p !== null && typeof p === 'object' && !Array.isArray(p)) ? p : null;
+              } catch (e) { return null; }
+            }
+            function unwrapJsonStrings(obj) {
+              if (typeof obj === 'string') return tryParseJsonObject(obj) || obj;
+              if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) return obj;
+              var out = {};
+              for (var k in obj) {
+                if (!obj.hasOwnProperty(k)) continue;
+                out[k] = unwrapJsonStrings(obj[k]);
+              }
+              return out;
+            }
+            function getFieldsFromBody(body) {
+              if (!body || typeof body !== 'object') return { fields: {}, tables: {} };
+              var metaKeys = { status: 1, id: 1, executionId: 1, execution: 1, documentName: 1, documentId: 1, result: 1, fields: 1, tables: 1, extractionResult: 1, extractionResults: 1 };
+              var f = body.fields || (body.result && body.result.fields) || (body.execution && body.execution.result && body.execution.result.fields) || (body.execution && body.execution.fields) || body.extractionResult || body.extractionResults || {};
+              if (typeof f === 'string') {
+                try { f = JSON.parse(f); } catch (e) { f = {}; }
+              }
+              f = unwrapJsonStrings(f);
+              var t = body.tables || (body.result && body.result.tables) || (body.execution && body.execution.result && body.execution.result.tables) || (body.execution && body.execution.tables) || {};
+              if (Array.isArray(f)) {
+                var out = {};
+                f.forEach(function(item) {
+                  var name = item.name || item.fieldName || item.key || item.id;
+                  var val = item.value != null ? item.value : (item.values && item.values[0]);
+                  if (name != null) out[name] = typeof val === 'object' && val !== null && 'value' in val ? val : { value: val };
+                });
+                f = out;
+              }
+              if (typeof f !== 'object' || f === null) f = {};
+              if (typeof t !== 'object' || t === null) t = {};
+              if (Object.keys(f).length === 0 && typeof body === 'object') {
+                for (var k in body) {
+                  if (metaKeys[k] || !body.hasOwnProperty(k)) continue;
+                  var v = body[k];
+                  if (v !== null && typeof v === 'object' && !Array.isArray(v)) f[k] = v;
+                  else f[k] = { value: v };
+                }
+              }
+              var allNested = Object.keys(f).length > 0 && Object.keys(f).every(function(k) {
+                var v = f[k];
+                return v !== null && typeof v === 'object' && !Array.isArray(v);
+              });
+              if (allNested) {
+                var flat = {};
+                for (var sec in f) {
+                  if (!f.hasOwnProperty(sec)) continue;
+                  var sub = flattenNestedFieldsToValueMap(f[sec], sec);
+                  for (var sk in sub) { if (sub.hasOwnProperty(sk)) flat[sk] = sub[sk]; }
+                }
+                f = flat;
+              }
+              if (Object.keys(f).length === 1) {
+                var onlyKey = Object.keys(f)[0];
+                var onlyVal = f[onlyKey];
+                if (onlyVal !== null && typeof onlyVal === 'object' && !Array.isArray(onlyVal) && Object.keys(onlyVal).length > 1) {
+                  var inner = flattenNestedFieldsToValueMap(onlyVal, onlyKey);
+                  if (Object.keys(inner).length > 1) f = inner;
+                }
+              }
+              return { fields: f, tables: t };
+            }
+            var extracted = getFieldsFromBody(_currentBody);
+            var fields = extracted.fields;
+            var tables = extracted.tables;
+            _currentBody.fields = fields;
+            _currentBody.tables = tables;
+            window.currentFile = _currentFile;
+            window.currentBody = _currentBody;
+            var container = document.getElementById('fieldsList');
+            if (container) {
+              container.innerHTML = '';
+              var fieldKeys = Object.keys(fields).sort();
+              if (fieldKeys.length === 0 && Object.keys(tables).length === 0) {
+                container.innerHTML = '<p class="placeholder" style="color:var(--text-muted);font-size:0.875rem;">No fields in response. The IDP result may use a different structure; the document preview is above.</p>';
+              } else {
+                if (window.renderFields) {
+                  window.renderFields(fields, tables);
+                } else {
+                  fieldKeys.forEach(function(key) {
+                    var val = fields[key];
+                    var str = (val && typeof val === 'object' && 'value' in val) ? (val.value == null ? '' : String(val.value)) : (val != null ? String(val) : '');
+                    var row = document.createElement('div');
+                    row.className = 'field-row';
+                    var labelText = key.indexOf('.') >= 0 ? key.split('.').pop() : key;
+                    if (window.fieldDisplayName) labelText = window.fieldDisplayName(labelText);
+                    row.innerHTML = '<label title="' + key.replace(/"/g, '&quot;') + '">' + labelText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;') + '</label><input type="text" value="' + str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;') + '" data-key="' + key.replace(/"/g, '&quot;') + '">';
+                    container.appendChild(row);
+                  });
+                  Object.keys(tables).forEach(function(tk) {
+                    var row = document.createElement('div');
+                    row.className = 'field-row';
+                    row.innerHTML = '<label>[table] ' + tk + '</label><input type="text" value="(see JSON)" disabled>';
+                    container.appendChild(row);
+                  });
+                }
+              }
+              var panel = document.getElementById('fieldsPanel');
+              if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+            document.getElementById('documentName').value = _currentBody.documentName || _currentFile.name || '';
+          } catch (err) {
+            if (statusBox) { statusBox.textContent = 'Error: ' + (err && err.message ? err.message : String(err)); statusBox.style.color = 'var(--error)'; }
+          }
+          if (btn) { btn.disabled = false; btn.textContent = 'Extract'; }
+        };
+        window._saveCredsImpl = function() {
+          var c = {
+            platform: document.getElementById('platform').value,
+            region: document.getElementById('region').value.trim(),
+            org_id: document.getElementById('org_id').value.trim(),
+            action_id: document.getElementById('action_id').value.trim(),
+            action_version: document.getElementById('action_version').value.trim(),
+            client_id: document.getElementById('client_id').value.trim(),
+            client_secret: document.getElementById('client_secret').value.trim()
+          };
+          localStorage.setItem('idp_upload_credentials', JSON.stringify(c));
+          var fd = new FormData();
+          fd.append('platform', c.platform || 'production');
+          fd.append('region', c.region);
+          fd.append('org_id', c.org_id);
+          fd.append('action_id', c.action_id);
+          fd.append('action_version', c.action_version);
+          fd.append('client_id', c.client_id);
+          fd.append('client_secret', c.client_secret);
+          fetch('/api/settings/idp-credentials', { method: 'POST', body: fd }).then(function(r) {
+            var msg = document.getElementById('saveCredsMsg');
+            if (!msg) return;
+            if (r.ok) { msg.textContent = 'Saved on server (persists across all sessions).'; msg.style.color = 'var(--success)'; }
+            else { r.text().then(function(t) { msg.textContent = 'Save failed: ' + (t || r.status); msg.style.color = 'var(--error)'; }); }
+          }).catch(function(err) {
+            var msg = document.getElementById('saveCredsMsg');
+            if (msg) { msg.textContent = 'Save failed: ' + (err.message || 'network error'); msg.style.color = 'var(--error)'; }
+          });
+          var h = document.getElementById('credsHint');
+          if (h) h.style.display = 'block';
+        };
+        window.runExtract = function() {
+          var s = document.getElementById('extractStatusBox');
+          var b = document.getElementById('extractBtn');
+          if (s) { s.textContent = 'Extracting… (calling IDP; this may take a few minutes).'; s.style.color = 'var(--text-muted)'; }
+          if (b) { b.disabled = true; b.textContent = 'Extracting…'; }
+          if (window._runExtractImpl) window._runExtractImpl(); else if (s) s.textContent = 'Script not ready — refresh the page and try again.';
+        };
+        var btn = document.getElementById('extractBtn');
+        if (btn) btn.onclick = function() { window.runExtract(); return false; };
+        var saveBtn = document.getElementById('saveCredsBtn');
+        if (saveBtn) saveBtn.onclick = function() {
+          var m = document.getElementById('saveCredsMsg');
+          if (m) { m.textContent = 'Saving…'; m.style.color = 'var(--text-muted)'; }
+          if (window._saveCredsImpl) window._saveCredsImpl(); else if (m) m.textContent = 'Script not ready.';
+        };
+        function setFormFromCredsEarly(c) {
+          if (!c) return;
+          var el = function(id) { return document.getElementById(id); };
+          if (c.platform && el('platform')) el('platform').value = c.platform;
+          if (c.region && el('region')) el('region').value = c.region;
+          if (c.org_id && el('org_id')) el('org_id').value = c.org_id;
+          if (c.action_id && el('action_id')) el('action_id').value = c.action_id;
+          if (c.action_version && el('action_version')) el('action_version').value = c.action_version;
+          if (c.client_id && el('client_id')) el('client_id').value = c.client_id;
+          if (c.client_secret && el('client_secret')) el('client_secret').value = c.client_secret;
+          var hint = el('credsHint');
+          if (hint && (c.region || c.org_id || c.client_id)) { hint.style.display = 'block'; hint.textContent = 'Credentials loaded (saved on server; persist across refreshes and sessions).'; }
+        }
+        fetch('/api/settings/idp-credentials').then(function(r) { return r.ok ? r.json() : {}; }).then(function(c) {
+          if (c && (c.region || c.org_id || c.client_id)) setFormFromCredsEarly(c);
+          else try { var s = localStorage.getItem('idp_upload_credentials'); if (s) setFormFromCredsEarly(JSON.parse(s)); } catch (e) {}
+        }).catch(function() {
+          try { var s = localStorage.getItem('idp_upload_credentials'); if (s) setFormFromCredsEarly(JSON.parse(s)); } catch (e) {}
+        });
+      })();
+    </script>
+
+    <div class="card" id="resultCard" style="display: none;">
+      <div class="card-header">2. Document and editable fields</div>
+      <p style="margin: 0 0 12px 0; font-size: 0.875rem; color: var(--text-muted);">Rename below if needed, edit each field value in the list, then click Save as ground truth.</p>
+      <div class="split-view">
+        <div class="doc-panel">
+          <div class="placeholder" id="docPlaceholder">Document will appear here after extraction.</div>
+          <div id="docZoomToolbar" class="doc-zoom-toolbar" style="display: none;">
+            <button type="button" class="btn btn-ghost btn-sm" id="docZoomOut" title="Zoom out">−</button>
+            <span class="zoom-label" id="docZoomLabel">100%</span>
+            <button type="button" class="btn btn-ghost btn-sm" id="docZoomIn" title="Zoom in">+</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="docZoomReset" title="Reset zoom">Reset</button>
+            <label class="doc-thumbs-toggle" style="margin-left: 12px; font-size: 0.8125rem; color: var(--text-muted); cursor: pointer;">
+              <input type="checkbox" id="docShowThumbs" style="margin-right: 4px;"> Thumbnails
+            </label>
+          </div>
+          <div id="docZoomWrap" class="doc-zoom-wrap" style="display: none;">
+            <div id="docZoomSizer" class="doc-zoom-sizer">
+              <div id="docZoomScaled" class="doc-zoom-scaled">
+                <iframe id="docFrame" style="display: none;" title="Document"></iframe>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="fields-panel" id="fieldsPanel">
+            <div id="fieldsList"></div>
+          </div>
+          <div class="save-row">
+            <input type="text" id="documentName" placeholder="Document name (e.g. 20700798.pdf)" style="max-width: 280px;">
+            <button type="button" class="btn btn-primary" id="saveBtn">Save as ground truth</button>
+          </div>
+          <p id="saveMsg" style="margin-top: 8px; min-height: 28px; font-size: 0.9375rem; display: block;"></p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+  (function() {
+    window._saveGroundTruthImpl = async function() {
+      var msgEl = document.getElementById('saveMsg');
+      var nameEl = document.getElementById('documentName');
+      var name = nameEl ? nameEl.value.trim() : '';
+      if (!name) {
+        if (msgEl) { msgEl.textContent = 'Enter a document name.'; msgEl.style.color = 'var(--error)'; msgEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+        return;
+      }
+      if (msgEl) { msgEl.textContent = 'Saving…'; msgEl.style.color = 'var(--text-muted)'; msgEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+      var fields = {};
+      var inputs = document.querySelectorAll('#fieldsList input[data-key]');
+      for (var i = 0; i < inputs.length; i++) {
+        var inp = inputs[i];
+        if (inp.disabled) continue;
+        var key = inp.getAttribute('data-key');
+        if (key) fields[key] = { value: inp.value === '' ? null : inp.value };
+      }
+      var fd = new FormData();
+      fd.append('name', name);
+      fd.append('fields_json', JSON.stringify(fields));
+      var docId = (name || '').replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 200) || undefined;
+      if (docId) fd.append('document_id', docId);
+      var r, data;
+      try {
+        r = await fetch('/api/saved-ground-truth', { method: 'POST', body: fd });
+        var raw = await r.text();
+        try { data = raw ? JSON.parse(raw) : {}; } catch (e) { data = {}; }
+      } catch (err) {
+        if (msgEl) { msgEl.textContent = 'Error: ' + (err.message || String(err)); msgEl.style.color = 'var(--error)'; msgEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+        return;
+      }
+      if (!r.ok) {
+        var errMsg = data.detail != null ? (Array.isArray(data.detail) ? data.detail.map(function(d) { return d.msg || JSON.stringify(d); }).join('; ') : (typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail))) : (data.message || data.error || 'HTTP ' + r.status);
+        if (msgEl) { msgEl.textContent = 'Error: ' + errMsg; msgEl.style.color = 'var(--error)'; msgEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+        return;
+      }
+      if (msgEl) msgEl.textContent = 'Saved. Redirecting...';
+      window.location.href = '/saved-ground-truth';
+    };
+    var saveBtnEarly = document.getElementById('saveBtn');
+    if (saveBtnEarly) {
+      saveBtnEarly.onclick = function() {
+        var m = document.getElementById('saveMsg');
+        if (m) { m.textContent = 'Saving…'; m.style.color = 'var(--text-muted)'; m.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+        var p = window._saveGroundTruthImpl && window._saveGroundTruthImpl();
+        if (p && typeof p.then === 'function') p.catch(function(e) {
+          var msg = document.getElementById('saveMsg');
+          if (msg) { msg.textContent = 'Error: ' + (e && e.message ? e.message : String(e)); msg.style.color = 'var(--error)'; msg.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+        });
+      };
+    }
+  })();
+  </script>
+  <script>
+    (function() {
+      var docZoom = 100;
+      var docZoomMin = 50;
+      var docZoomMax = 300;
+      var docZoomStep = 25;
+      var docBaseH = 700;
+      function docZoomApply() {
+        var sizer = document.getElementById('docZoomSizer');
+        var scaled = document.getElementById('docZoomScaled');
+        var label = document.getElementById('docZoomLabel');
+        var pct = docZoom / 100;
+        // Sizer: use % of viewport so at 100% zoom content fills the wrap; at 150% it grows and scrollbars appear
+        if (sizer) {
+          sizer.style.width = docZoom + '%';
+          sizer.style.height = (docBaseH * pct) + 'px';
+        }
+        // Scaled: always 100% of sizer width and fixed height, then scale so content fills at 100% and zooms correctly
+        if (scaled) {
+          scaled.style.width = '100%';
+          scaled.style.height = docBaseH + 'px';
+          scaled.style.transform = 'scale(' + pct + ')';
+        }
+        if (label) label.textContent = docZoom + '%';
+      }
+      window._docZoomApply = docZoomApply;
+      window._docZoomReset = function() {
+        docZoom = 100;
+        docZoomApply();
+      };
+      document.getElementById('docZoomOut').onclick = function() {
+        if (docZoom <= docZoomMin) return;
+        docZoom = Math.max(docZoomMin, docZoom - docZoomStep);
+        docZoomApply();
+      };
+      document.getElementById('docZoomIn').onclick = function() {
+        if (docZoom >= docZoomMax) return;
+        docZoom = Math.min(docZoomMax, docZoom + docZoomStep);
+        docZoomApply();
+      };
+      document.getElementById('docZoomReset').onclick = function() {
+        window._docZoomReset();
+      };
+      document.getElementById('docShowThumbs').onchange = function() {
+        var frame = document.getElementById('docFrame');
+        if (!frame || !frame.src) return;
+        var show = this.checked;
+        var url = frame.src.replace(/#.*$/, '');
+        var hash = show ? '#toolbar=1&navpanes=1' : '#toolbar=0&navpanes=0';
+        frame.src = url + hash;
+      };
+      if (window.ResizeObserver) {
+        var wrap = document.getElementById('docZoomWrap');
+        if (wrap) {
+          var ro = new ResizeObserver(function() { docZoomApply(); });
+          ro.observe(wrap);
+        }
+      }
+    })();
+  </script>
+  <script>
+    (function() {
+      function gatherFieldsForSave() {
+        var fields = {};
+        var inputs = document.querySelectorAll('#fieldsList input[data-key]');
+        for (var i = 0; i < inputs.length; i++) {
+          var inp = inputs[i];
+          if (inp.disabled) continue;
+          var key = inp.getAttribute('data-key');
+          if (key) fields[key] = { value: inp.value === '' ? null : inp.value };
+        }
+        return fields;
+      }
+      window.gatherFieldsForSave = gatherFieldsForSave;
+      window._saveGroundTruthImpl = async function() {
+        var msgEl = document.getElementById('saveMsg');
+        var nameEl = document.getElementById('documentName');
+        var name = nameEl ? nameEl.value.trim() : '';
+        if (!name) {
+          if (msgEl) { msgEl.textContent = 'Enter a document name.'; msgEl.style.color = 'var(--error)'; msgEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+          return;
+        }
+        if (msgEl) { msgEl.textContent = 'Saving…'; msgEl.style.color = 'var(--text-muted)'; msgEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+        var r = null;
+        var data = null;
+        try {
+          var fieldsObj = gatherFieldsForSave();
+          var fd = new FormData();
+          fd.append('name', name);
+          fd.append('fields_json', JSON.stringify(fieldsObj));
+          var docId = (name || '').replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 200) || undefined;
+          if (docId) fd.append('document_id', docId);
+          var controller = new AbortController();
+          var timeoutId = setTimeout(function() { controller.abort(); }, 20000);
+          r = await fetch('/api/saved-ground-truth', { method: 'POST', body: fd, signal: controller.signal });
+          clearTimeout(timeoutId);
+          var raw = await r.text();
+          try { data = raw ? JSON.parse(raw) : {}; } catch (e) { data = {}; }
+        } catch (err) {
+          if (msgEl) {
+            msgEl.textContent = err.name === 'AbortError' ? 'Request timed out (20s). Check the server.' : ('Error: ' + (err.message || String(err)));
+            msgEl.style.color = 'var(--error)';
+            msgEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          }
+          return;
+        }
+        if (!r.ok) {
+          var errMsg = data.detail != null ? (Array.isArray(data.detail) ? data.detail.map(function(d) { return d.msg || JSON.stringify(d); }).join('; ') : (typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail))) : (data.message || data.error || 'HTTP ' + r.status);
+          if (msgEl) { msgEl.textContent = 'Error: ' + errMsg; msgEl.style.color = 'var(--error)'; msgEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+          return;
+        }
+        if (msgEl) {
+          msgEl.innerHTML = 'Saved as "' + name + '". <a href="/runs/new">Go to New run</a> and use "Load from saved" to use this as Expected.';
+          msgEl.style.color = 'var(--success)';
+        }
+        window.location.href = '/saved-ground-truth';
+        setTimeout(function() { window.location.href = '/saved-ground-truth'; }, 1500);
+      };
+      var saveBtn = document.getElementById('saveBtn');
+      if (saveBtn) {
+        saveBtn.onclick = function() {
+          var m = document.getElementById('saveMsg');
+          if (m) { m.textContent = 'Saving…'; m.style.color = 'var(--text-muted)'; m.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+          var p = window._saveGroundTruthImpl && window._saveGroundTruthImpl();
+          if (p && typeof p.then === 'function') p.catch(function(e) {
+            var msg = document.getElementById('saveMsg');
+            if (msg) { msg.textContent = 'Error: ' + (e && e.message ? e.message : String(e)); msg.style.color = 'var(--error)'; msg.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+          });
+        };
+      }
+    })();
+  </script>
+  <script>
+    var currentFile = null;
+    var currentBody = null;
+    if (typeof window.currentFile === 'undefined') window.currentFile = null;
+    if (typeof window.currentBody === 'undefined') window.currentBody = null;
+
+    var CREDS_KEY = 'idp_upload_credentials';
+
+    function setFormFromCreds(c) {
+      if (!c) return;
+      if (c.platform) document.getElementById('platform').value = c.platform;
+      if (c.region) document.getElementById('region').value = c.region;
+      if (c.org_id) document.getElementById('org_id').value = c.org_id;
+      if (c.action_id) document.getElementById('action_id').value = c.action_id;
+      if (c.action_version) document.getElementById('action_version').value = c.action_version;
+      if (c.client_id) document.getElementById('client_id').value = c.client_id;
+      if (c.client_secret) document.getElementById('client_secret').value = c.client_secret;
+    }
+
+    function loadCredentials() {
+      fetch('/api/settings/idp-credentials').then(function(r) {
+        if (!r.ok) throw new Error('Server ' + r.status);
+        return r.json();
+      }).then(function(c) {
+        if (c && (c.region || c.org_id || c.client_id)) {
+          setFormFromCreds(c);
+          var hint = document.getElementById('credsHint');
+          if (hint) { hint.style.display = 'block'; hint.textContent = 'Credentials loaded (saved on server; persist across refreshes and sessions).'; }
+        } else {
+          var s = localStorage.getItem(CREDS_KEY);
+          if (s) try { var c2 = JSON.parse(s); setFormFromCreds(c2); if (document.getElementById('credsHint')) { document.getElementById('credsHint').style.display = 'block'; document.getElementById('credsHint').textContent = 'Credentials loaded from this browser (save to store on server for all sessions).'; } } catch (e) {}
+        }
+      }).catch(function(err) {
+        var s = localStorage.getItem(CREDS_KEY);
+        if (s) try { setFormFromCreds(JSON.parse(s)); } catch (e) {}
+        var hint = document.getElementById('credsHint');
+        if (hint && !document.getElementById('region').value) hint.style.display = 'none';
+      });
+    }
+    loadCredentials();
+
+    function getFieldValue(obj) {
+      if (obj == null) return '';
+      if (typeof obj === 'object' && 'value' in obj) return obj.value == null ? '' : String(obj.value);
+      return String(obj);
+    }
+
+    function renderFields(fields, tables) {
+      var container = document.getElementById('fieldsList');
+      container.innerHTML = '';
+      var fieldNames = Object.keys(fields).sort();
+      fieldNames.forEach(function(key) {
+        var val = getFieldValue(fields[key]);
+        var row = document.createElement('div');
+        row.className = 'field-row';
+        row.dataset.key = key;
+        var labelText = key.indexOf('.') >= 0 ? key.split('.').pop() : key;
+        if (window.fieldDisplayName) labelText = window.fieldDisplayName(labelText);
+        row.innerHTML = '<label title="' + escapeHtml(key) + '">' + escapeHtml(labelText) + '</label><input type="text" value="' + escapeHtml(val) + '" data-key="' + escapeHtml(key) + '">';
+        container.appendChild(row);
+      });
+      if (typeof tables === 'object' && Object.keys(tables).length > 0) {
+        Object.keys(tables).forEach(function(tableKey) {
+          var row = document.createElement('div');
+          row.className = 'field-row';
+          row.innerHTML = '<label title="table:' + tableKey + '">[table] ' + tableKey + '</label><input type="text" value="(see JSON)" disabled>';
+          container.appendChild(row);
+        });
+      }
+    }
+    window.renderFields = renderFields;
+
+    function escapeHtml(s) {
+      var div = document.createElement('div');
+      div.textContent = s;
+      return div.innerHTML;
+    }
+    function fieldDisplayName(key) {
+      if (!key || typeof key !== 'string') return key || '';
+      return key.indexOf('.') >= 0 ? key.split('.').pop() : key;
+    }
+    window.fieldDisplayName = fieldDisplayName;
+
+    function gatherFields() {
+      var fields = {};
+      var inputs = document.querySelectorAll('#fieldsList input[data-key]');
+      inputs.forEach(function(inp) {
+        var key = inp.getAttribute('data-key');
+        if (key) fields[key] = { value: inp.value === '' ? null : inp.value };
+      });
+      var body = window.currentBody || currentBody;
+      var tables = (body && body.tables) ? body.tables : {};
+      return { fields: fields, tables: tables };
+    }
+
+    function getPayloadForSave() {
+      var g = gatherFields();
+      return g;
+    }
+
+    if (document.getElementById('saveBtn') && !document.getElementById('saveBtn').onclick) document.getElementById('saveBtn').onclick = async function() {
+      var name = document.getElementById('documentName').value.trim();
+      if (!name) {
+        document.getElementById('saveMsg').textContent = 'Enter a document name.';
+        document.getElementById('saveMsg').style.color = 'var(--error)';
+        return;
+      }
+      var payload = getPayloadForSave();
+      var msgEl = document.getElementById('saveMsg');
+      msgEl.textContent = 'Saving…';
+      msgEl.style.color = 'var(--text-muted)';
+      try {
+        var fd = new FormData();
+        fd.append('name', name);
+        fd.append('fields_json', JSON.stringify(payload));
+        var r = await fetch('/api/saved-ground-truth', { method: 'POST', body: fd });
+        var data = await r.json();
+        if (!r.ok) {
+          msgEl.textContent = 'Error: ' + (data.detail || data.error || r.status);
+          msgEl.style.color = 'var(--error)';
+          return;
+        }
+        msgEl.innerHTML = 'Saved as "' + name + '". <a href="/runs/new">Go to New run</a> and use "Load from saved" to use this as Expected.';
+        msgEl.style.color = 'var(--success)';
+      } catch (err) {
+        msgEl.textContent = 'Error: ' + err.message;
+        msgEl.style.color = 'var(--error)';
+      }
+    };
+  </script>
+</body>
+</html>

@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Saved Ground Truth – IDP Validation</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    .form-list { list-style: none; margin: 0; padding: 0; }
+    .form-list li { margin-bottom: 8px; }
+    .form-summary { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; font-size: 0.9375rem; }
+    .form-summary:hover { background: var(--bg-hover, #f0f0f0); }
+    .form-summary .form-title { font-weight: 600; color: var(--text); }
+    .form-summary .form-meta { color: var(--text-muted); font-size: 0.8125rem; }
+    .form-summary .chevron { color: var(--text-muted); transition: transform 0.2s; }
+    .form-list li.expanded .chevron { transform: rotate(90deg); }
+    .form-detail { padding: 16px; border: 1px solid var(--border); border-top: none; border-radius: 0 0 var(--radius-sm) var(--radius-sm); background: var(--bg); }
+    .form-fields { margin-bottom: 16px; }
+    .form-fields .field-row { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
+    .form-fields .field-name { color: var(--text-muted); min-width: 160px; font-size: 0.8125rem; font-family: monospace; }
+    .form-fields .field-value { flex: 1; padding: 6px 10px; font-size: 0.875rem; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+    .form-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+    .save-msg { font-size: 0.875rem; margin-left: 8px; }
+  </style>
+</head>
+<body>
+  <div class="app-wrap">
+    <h1>Saved Ground Truth / Expected</h1>
+    <p class="subtitle">Click a form to expand and edit. Changes are saved as the new ground truth. Use "Load from saved" on the New run page to use one as Expected.</p>
+    <nav class="nav">
+      <a href="/">Home</a>
+      <a href="/extract-edit">Extract & Edit</a>
+      <a href="/runs/new">New run</a>
+      <a href="/runs">Runs</a>
+      <a href="/expected">Expected data</a>
+    </nav>
+    <div id="listContainer">
+      <p id="loadingMsg" style="color: var(--text-muted);">Loading…</p>
+      <ul id="formList" class="form-list"></ul>
+      <p id="emptyMsg" style="display: none; color: var(--text-muted);">No saved ground truth yet. Use <a href="/extract-edit">Extract & Edit</a> to save one.</p>
+    </div>
+  </div>
+  <script>
+    function esc(s) {
+      if (s == null) return '';
+      var d = document.createElement('div');
+      d.textContent = String(s);
+      return d.innerHTML;
+    }
+    function getFieldDisplayValue(v) {
+      if (v == null) return '';
+      if (typeof v === 'object' && v !== null && 'value' in v) return v.value == null ? '' : String(v.value);
+      return String(v);
+    }
+    function saveForm(item, name, documentId, fields, tables, detailEl, saveMsgEl) {
+      var payload = { fields: {}, tables: tables || {} };
+      var inputs = detailEl.querySelectorAll('input[data-field-key]');
+      for (var i = 0; i < inputs.length; i++) {
+        var inp = inputs[i];
+        if (inp.disabled) continue;
+        var key = inp.getAttribute('data-field-key');
+        if (key) payload.fields[key] = { value: inp.value === '' ? null : inp.value };
+      }
+      saveMsgEl.textContent = 'Saving…';
+      saveMsgEl.style.color = 'var(--text-muted)';
+      var fd = new FormData();
+      fd.append('name', name);
+      fd.append('document_id', documentId || '');
+      fd.append('fields_json', JSON.stringify(payload));
+      fetch('/api/saved-ground-truth', { method: 'POST', body: fd }).then(function(r) {
+        return r.json().then(function(data) {
+          if (r.ok) {
+            saveMsgEl.textContent = 'Saved.';
+            saveMsgEl.style.color = 'var(--success)';
+            setTimeout(function() { saveMsgEl.textContent = ''; }, 2000);
+          } else {
+            saveMsgEl.textContent = 'Error: ' + (data.detail || data.message || r.status);
+            saveMsgEl.style.color = 'var(--error)';
+          }
+        }).catch(function() {
+          saveMsgEl.textContent = 'Error saving.';
+          saveMsgEl.style.color = 'var(--error)';
+        });
+      }).catch(function() {
+        saveMsgEl.textContent = 'Error saving.';
+        saveMsgEl.style.color = 'var(--error)';
+      });
+    }
+    function loadList() {
+      var loading = document.getElementById('loadingMsg');
+      var list = document.getElementById('formList');
+      var empty = document.getElementById('emptyMsg');
+      fetch('/api/saved-ground-truth?include_fields=true').then(function(r) { return r.json(); }).then(function(items) {
+        loading.style.display = 'none';
+        list.innerHTML = '';
+        if (!items || items.length === 0) {
+          empty.style.display = 'block';
+          return;
+        }
+        empty.style.display = 'none';
+        items.forEach(function(item, idx) {
+          var title = (item.name && String(item.name).trim()) ? item.name : ('Form ' + (idx + 1));
+          var fields = (item.fields && item.fields.fields) ? item.fields.fields : (item.fields || {});
+          var tables = (item.fields && item.fields.tables) ? item.fields.tables : {};
+          var fieldCount = Object.keys(fields).length + (tables && typeof tables === 'object' ? Object.keys(tables).length : 0);
+          var li = document.createElement('li');
+          li.className = 'form-item';
+          li.dataset.id = item.id;
+          li.dataset.documentId = item.document_id || '';
+          var summary = document.createElement('div');
+          summary.className = 'form-summary';
+          summary.innerHTML = '<span class="form-title">' + esc(title) + '</span><span class="form-meta">' + fieldCount + ' field' + (fieldCount !== 1 ? 's' : '') + '</span><span class="chevron">▶</span>';
+          var detail = document.createElement('div');
+          detail.className = 'form-detail';
+          detail.style.display = 'none';
+          var fieldsHtml = '';
+          function fieldDisplayName(key) {
+            if (!key || typeof key !== 'string') return key || '';
+            return key.indexOf('.') >= 0 ? key.split('.').pop() : key;
+          }
+          Object.keys(fields).sort().forEach(function(k) {
+            var val = getFieldDisplayValue(fields[k]);
+            var labelText = k.indexOf('.') >= 0 ? k.split('.').pop() : k;
+            labelText = fieldDisplayName(labelText);
+            fieldsHtml += '<div class="field-row"><span class="field-name" title="' + esc(k) + '">' + esc(labelText) + '</span><input type="text" class="field-value" value="' + esc(val) + '" data-field-key="' + esc(k) + '" data-document-id="' + esc(item.document_id || '') + '"></div>';
+          });
+          if (tables && typeof tables === 'object' && Object.keys(tables).length > 0) {
+            Object.keys(tables).forEach(function(tk) {
+              fieldsHtml += '<div class="field-row"><span class="field-name">[table] ' + esc(tk) + '</span><input type="text" class="field-value" value="(see JSON)" disabled></div>';
+            });
+          }
+          var saveMsg = document.createElement('span');
+          saveMsg.className = 'save-msg';
+          detail.innerHTML = '<div class="form-fields">' + (fieldsHtml || '<p style="color:var(--text-muted);margin:0;">No fields</p>') + '</div><div class="form-actions"><button type="button" class="btn btn-primary save-btn">Save changes</button><button type="button" class="btn btn-ghost delete-btn">Delete</button><span class="save-msg"></span></div>';
+          saveMsg = detail.querySelector('.save-msg');
+          summary.onclick = function() {
+            var isExp = li.classList.contains('expanded');
+            if (isExp) { detail.style.display = 'none'; li.classList.remove('expanded'); }
+            else { detail.style.display = 'block'; li.classList.add('expanded'); }
+          };
+          detail.querySelector('.save-btn').onclick = function(e) {
+            e.stopPropagation();
+            saveForm(item, title, item.document_id, fields, tables, detail, saveMsg);
+          };
+          detail.querySelector('.delete-btn').onclick = function(e) {
+            e.stopPropagation();
+            if (!confirm('Delete "' + title + '"?')) return;
+            fetch('/api/saved-ground-truth/' + item.id, { method: 'DELETE' }).then(function(res) {
+              if (res.ok) {
+                li.remove();
+                if (list.children.length === 0) document.getElementById('emptyMsg').style.display = 'block';
+              }
+            });
+          };
+          li.appendChild(summary);
+          li.appendChild(detail);
+          list.appendChild(li);
+        });
+      }).catch(function() {
+        loading.textContent = 'Failed to load list.';
+        loading.style.color = 'var(--error)';
+      });
+    }
+    loadList();
+  </script>
+</body>
+</html>

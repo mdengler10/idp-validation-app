@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AssistRx Test Suite – IDP Validation</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    .suite-section { margin-bottom: 36px; }
+    .suite-section h2 { font-size: 1.25rem; color: var(--text); margin-bottom: 4px; }
+    .suite-section p.section-desc { color: var(--text-muted); font-size: 0.875rem; margin: 0 0 16px 0; }
+    .suite-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+    .suite-card { display: block; text-decoration: none; color: inherit; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; transition: border-color 0.15s, transform 0.1s; }
+    .suite-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+    .suite-card h3 { margin: 0 0 6px 0; font-size: 1rem; }
+    .suite-card .meta { font-size: 0.8125rem; color: var(--text-muted); margin-bottom: 12px; }
+    .badge { display: inline-block; font-size: 0.75rem; padding: 2px 8px; border-radius: 999px; margin-right: 6px; }
+    .badge-ok { background: var(--success-bg); color: var(--success); }
+    .badge-warn { background: rgba(210, 153, 34, 0.2); color: #d29922; }
+    .badge-muted { background: var(--bg-input); color: var(--text-muted); }
+    .score-line { font-size: 0.9375rem; margin-top: 8px; }
+    .score-pct { font-weight: 600; }
+    .score-pct.good { color: var(--success); }
+    .score-pct.mid { color: #d29922; }
+    .score-pct.bad { color: var(--error); }
+  </style>
+</head>
+<body>
+  <div class="app-wrap">
+    <h1>AssistRx IDP Test Suite</h1>
+    <p class="subtitle">Reference documents across enrollment, insurance, and CoPay. Pass = {{ summary.pass_threshold_pct if summary else 90 }}%+ field accuracy per run.</p>
+    <nav class="nav">
+      <a href="/">Home</a>
+      <a href="/runs">Runs</a>
+      <a href="/extract-edit">Extract & Edit</a>
+      <a href="/saved-ground-truth">Saved Ground Truth</a>
+    </nav>
+
+    {% if summary %}
+    <div class="card" style="margin-bottom: 28px; padding: 16px 20px;">
+      <div style="display: flex; flex-wrap: wrap; gap: 24px; font-size: 0.9375rem;">
+        <div><strong>{{ summary.ground_truth_count }}</strong> / {{ summary.total_documents }} ground truths saved</div>
+        <div><strong>{{ summary.tested_count }}</strong> documents with at least one test run</div>
+        {% if summary.average_run_avg_pct is not none %}
+        <div>Average across all runs (per document): <strong>{{ summary.average_run_avg_pct }}%</strong> field accuracy</div>
+        {% endif %}
+        {% if summary.ground_truth_avg_pct is not none %}
+        <div>Ground-truth documents avg: <strong>{{ summary.ground_truth_avg_pct }}%</strong> ({{ summary.documents_with_runs }} forms with runs)</div>
+        {% endif %}
+        {% if summary.average_last_pct is not none %}
+        <div>Average of <em>latest</em> run only: <strong>{{ summary.average_last_pct }}%</strong></div>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% set section_titles = {
+      'enrollment': 'Patient enrollment forms',
+      'insurance': 'Insurance cards',
+      'copay': 'CoPay claims'
+    } %}
+    {% set section_desc = {
+      'enrollment': 'Patient enrollment forms (Vyvgart, Theloryx, Assistivan, Somatuline / Ipsen CARES)',
+      'insurance': 'Insurance card document action (flat fields)',
+      'copay': 'CoPay claim document action (Master_Prompt JSON)'
+    } %}
+
+    {% for cat_key, cat_label in section_titles.items() %}
+    <section class="suite-section">
+      <h2>{{ cat_label }}</h2>
+      <p class="section-desc">{{ section_desc[cat_key] }}{% if summary.category_avg_pct and summary.category_avg_pct[cat_key] is not none %} · Avg across runs: <strong>{{ summary.category_avg_pct[cat_key] }}%</strong>{% endif %}</p>
+      <div class="suite-grid">
+        {% for item in categories[cat_key] %}
+        <a class="suite-card" href="/suite/{{ item.id }}">
+          <h3>{{ item.name }}</h3>
+          <div class="meta">{{ item.brand | capitalize }} · <code>{{ item.document_id }}</code></div>
+          {% if item.has_ground_truth %}
+          <span class="badge badge-ok">Ground truth saved</span>
+          {% else %}
+          <span class="badge badge-warn">Needs ground truth</span>
+          {% endif %}
+          {% if item.aggregate and item.aggregate.run_count > 0 and item.aggregate.avg_pct is not none %}
+          <div class="score-line">
+            Avg <strong>{{ item.aggregate.run_count }}</strong> run{{ 's' if item.aggregate.run_count != 1 else '' }}:
+            <span class="score-pct {% if item.aggregate.avg_pct >= 90 %}good{% elif item.aggregate.avg_pct >= 70 %}mid{% else %}bad{% endif %}">{{ item.aggregate.avg_pct }}%</span>
+            <span class="badge {% if item.aggregate.avg_pct >= 90 %}badge-ok{% else %}badge-warn{% endif %}" style="margin-left: 4px;">{{ 'Pass' if item.aggregate.avg_pct >= 90 else 'Fail' }}</span>
+            {% if item.aggregate.pass_count is defined %}
+            <span style="font-size: 0.75rem; color: var(--text-muted);">({{ item.aggregate.pass_count }} pass / {{ item.aggregate.fail_count }} fail)</span>
+            {% endif %}
+            {% if item.aggregate.min_pct is not none and item.aggregate.max_pct is not none and item.aggregate.min_pct != item.aggregate.max_pct %}
+            <span style="color: var(--text-muted); font-size: 0.8125rem;">({{ item.aggregate.min_pct }}–{{ item.aggregate.max_pct }}%)</span>
+            {% endif %}
+          </div>
+          {% endif %}
+          {% if item.latest and item.latest.pct is not none %}
+          <div class="score-line" style="font-size: 0.8125rem; color: var(--text-muted);">
+            Last:
+            <span class="score-pct {% if item.latest.pct >= 90 %}good{% elif item.latest.pct >= 70 %}mid{% else %}bad{% endif %}">{{ item.latest.pct }}%</span>
+            ({{ item.latest.score }}/{{ item.latest.total_fields }})
+          </div>
+          {% elif not item.aggregate or item.aggregate.run_count == 0 %}
+          <div class="score-line"><span class="badge badge-muted">No test runs yet</span></div>
+          {% endif %}
+        </a>
+        {% endfor %}
+      </div>
+    </section>
+    {% endfor %}
+  </div>
+</body>
+</html>

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Run #{{ run.id }} – IDP Validation</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    .field-row-header { font-weight: 600; font-size: 0.8125rem; color: var(--text-muted); margin-bottom: 8px; }
+    .field-row-header .expected-label { color: var(--success); }
+    .field-row-header .actual-label { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <div class="app-wrap">
+    <h1>Run #{{ run.id }}{% if run.label %} – {{ run.label }}{% endif %}</h1>
+    <p class="subtitle">{% if run.created_at %}{{ run.created_at.strftime('%Y-%m-%d %H:%M') }}{% else %}—{% endif %} · {{ results|length }} document(s) · Pass = {{ pass_threshold_pct }}%+ field accuracy</p>
+    <nav class="nav">
+      <a href="/">Home</a>
+      <a href="/runs">Runs</a>
+    </nav>
+
+    {% set passed = results|selectattr('effective_pass')|list|length %}
+    <div class="run-summary scoreboard">
+      <span class="stat">Total fields: <strong>{{ run_stats.total_fields }}</strong></span>
+      <span class="stat">Right: <strong style="color: var(--success);">{{ run_stats.right }}</strong></span>
+      <span class="stat">Wrong: <strong style="color: var(--error);">{{ run_stats.wrong }}</strong></span>
+      <span class="stat">% correct: <strong>{{ run_stats.pct }}%</strong>
+        <span class="badge {{ 'pass' if run_stats.run_pass else 'fail' }}" style="margin-left: 6px;">{{ 'Pass' if run_stats.run_pass else 'Fail' }}</span>
+      </span>
+      {% if run_stats.meaningful_pct is defined and run_stats.meaningful_pct != run_stats.pct %}
+      <span class="stat">Meaningful: <strong>{{ run_stats.meaningful_pct }}%</strong> <span style="color: var(--text-muted); font-size: 0.8125rem;">(excl. None/Not Found)</span></span>
+      {% endif %}
+    </div>
+    <div class="run-summary">
+      <span class="stat">Documents passed: <strong style="color: {% if passed == results|length %}var(--success){% else %}var(--error){% endif %}">{{ passed }}</strong> / {{ results|length }}</span>
+    </div>
+
+    {% for res in results %}
+    <div class="compare-doc card">
+      <div class="compare-doc-title">
+        {{ res.document_id }}
+        <span class="badge {{ 'pass' if res.effective_pass else 'fail' }}">{{ 'Pass' if res.effective_pass else 'Fail' }}</span>
+        {% if res.effective_pct is not none %}<span style="font-size: 0.8125rem; color: var(--text-muted);">({{ res.effective_pct }}%)</span>{% endif %}
+        {% if res.overrides %}<span style="font-size: 0.75rem; color: var(--text-muted);">(overrides applied)</span>{% endif %}
+      </div>
+
+      <div class="field-rows">
+        <div class="field-row field-row-header">
+          <div class="field-cell left"><span class="expected-label">Expected (golden)</span></div>
+          <div class="field-mid"></div>
+          <div class="field-cell right"><span class="actual-label">Actual (IDP result)</span></div>
+        </div>
+        {% for d in res.diff_details %}
+        <div class="field-row">
+          <div class="field-cell left">
+            <div class="field-name" title="{{ d.field }}">{{ d.field|field_display_name }}</div>
+            <div class="field-value">{{ d.expected_raw }}</div>
+            <div class="field-actions">
+              {% if d.effective_match %}
+              <button type="button" class="btn btn-ghost btn-sm override-btn" data-result-id="{{ res.id }}" data-field="{{ d.field }}" data-pass="false">Mark incorrect</button>
+              {% else %}
+              <button type="button" class="btn btn-ghost btn-sm override-btn" data-result-id="{{ res.id }}" data-field="{{ d.field }}" data-pass="true">Mark correct</button>
+              {% endif %}
+              {% if d.override_pass is not none %}
+              <button type="button" class="btn btn-ghost btn-sm clear-override-btn" data-result-id="{{ res.id }}" data-field="{{ d.field }}">Clear override</button>
+              {% endif %}
+            </div>
+          </div>
+          <div class="field-mid">
+            <span class="icon {{ 'pass' if d.effective_match else 'fail' }}" aria-hidden="true">{{ '✓' if d.effective_match else '✗' }}</span>
+          </div>
+          <div class="field-cell right">
+            <div class="field-name" title="{{ d.field }}">{{ d.field|field_display_name }}</div>
+            <div class="field-value">{{ d.actual_raw }}</div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <script>
+    document.querySelectorAll('.override-btn').forEach(btn => {
+      btn.onclick = async (e) => {
+        e.stopPropagation();
+        const resultId = btn.dataset.resultId, field = btn.dataset.field, pass = btn.dataset.pass === 'true';
+        const r = await fetch('/api/results/' + resultId + '/override', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ field_name: field, override_pass: pass }) });
+        if (r.ok) location.reload();
+        else alert('Failed');
+      };
+    });
+    document.querySelectorAll('.clear-override-btn').forEach(btn => {
+      btn.onclick = async (e) => {
+        e.stopPropagation();
+        const resultId = btn.dataset.resultId, field = encodeURIComponent(btn.dataset.field);
+        const r = await fetch('/api/results/' + resultId + '/override/' + field, { method: 'DELETE' });
+        if (r.ok) location.reload();
+        else alert('Failed');
+      };
+    });
+  </script>
+</body>
+</html>

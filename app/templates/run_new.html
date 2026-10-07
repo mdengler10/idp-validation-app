@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>New run – IDP Validation</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app-wrap">
+    <h1>New run</h1>
+    <p class="subtitle">Paste expected (correct) and IDP result JSON. Use either a single document’s fields <code>{"field": "value", ...}</code> or multiple docs keyed by ID <code>{"doc-1": {...}, "doc-2": {...}}</code>.</p>
+    <nav class="nav">
+      <a href="/">Home</a>
+      <a href="/runs">Runs</a>
+      <a href="/saved-ground-truth">Saved Ground Truth</a>
+      <a href="/extract-edit">Extract & Edit</a>
+      <a href="/expected">Expected data</a>
+    </nav>
+
+    <form id="form">
+      <div class="form-row">
+        <label for="label">Run label (optional)</label>
+        <input type="text" id="label" name="label" placeholder="e.g. before-retrain">
+      </div>
+
+      <div class="form-row" style="margin-bottom: 12px;">
+        <label>Load expected from saved</label>
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+          <select id="savedSelect" style="max-width: 320px; padding: 6px 10px;">
+            <option value="">— Choose a saved document —</option>
+          </select>
+          <button type="button" class="btn btn-ghost" id="loadSavedBtn">Load into Expected</button>
+        </div>
+        <span class="hint" style="font-size: 0.8125rem; color: var(--text-muted);">Saved documents come from the <a href="/extract-edit">Extract & Edit</a> page. They are stored in the database and are not removed when the app changes.</span>
+      </div>
+
+      <div class="card" style="margin-bottom: 20px; padding: 16px;">
+        <div class="card-header" style="margin-bottom: 12px;">Send document to IDP</div>
+        <p style="margin: 0 0 12px 0; font-size: 0.875rem; color: var(--text-muted);">Load a saved ground truth above (suite documents use that profile’s <strong>production</strong> action/version). Client ID/secret come from <a href="/extract-edit">Extract & Edit</a>. Attach a document, then Send to IDP.</p>
+        <p id="idpTargetLine" style="margin: 0 0 12px 0; font-size: 0.8125rem; color: var(--text-muted); display: none;"></p>
+        <input type="hidden" id="loadedDocumentId" value="">
+        <div class="form-row">
+          <label for="idpDocFile">Document (PDF or image)</label>
+          <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <input type="file" id="idpDocFile" name="file" accept=".pdf,image/*">
+            <button type="button" class="btn btn-primary" id="sendToIdpBtn" disabled>Send to IDP</button>
+          </div>
+        </div>
+        <p id="sendToIdpMsg" style="margin: 12px 0 0 0; min-height: 24px; font-size: 0.9375rem;"></p>
+      </div>
+
+      <div class="json-panels">
+        <div class="json-panel left">
+          <label>Expected (correct) JSON</label>
+          <textarea id="expected" name="expected" placeholder='Single doc: {"first_name": "Alice", "signup_date": "2024-09-15"}&#10;Or bulk: {"doc-1": {...}, "doc-2": {...}}'></textarea>
+        </div>
+        <div class="json-panel right">
+          <label>IDP result JSON</label>
+          <textarea id="idp" name="idp" placeholder='Same shape as left: single doc or keyed by document ID'></textarea>
+        </div>
+      </div>
+
+      <p id="msg" style="margin-bottom: 16px; min-height: 24px; font-size: 0.9375rem;"></p>
+      <button type="submit" class="btn btn-primary">Compare and create run</button>
+    </form>
+  </div>
+  <script>
+    (function loadSavedList() {
+      fetch('/api/saved-ground-truth').then(function(r) { return r.json(); }).then(function(list) {
+        var sel = document.getElementById('savedSelect');
+        sel.innerHTML = '<option value="">— Choose a saved document —</option>';
+        (list || []).forEach(function(item) {
+          var opt = document.createElement('option');
+          opt.value = item.id;
+          opt.textContent = item.name + (item.document_id ? ' (' + item.document_id + ')' : '');
+          sel.appendChild(opt);
+        });
+      }).catch(function() {});
+    })();
+
+    (function initSendToIdpButton() {
+      var fileInput = document.getElementById('idpDocFile');
+      var btn = document.getElementById('sendToIdpBtn');
+      function updateButton() {
+        btn.disabled = !(fileInput && fileInput.files && fileInput.files.length > 0);
+      }
+      if (fileInput) fileInput.addEventListener('change', updateButton);
+      updateButton();
+    })();
+
+    document.getElementById('loadSavedBtn').onclick = async function() {
+      var id = document.getElementById('savedSelect').value;
+      if (!id) return;
+      var r = await fetch('/api/saved-ground-truth/' + id);
+      if (!r.ok) return;
+      var data = await r.json();
+      var fields = data.fields || data;
+      document.getElementById('expected').value = JSON.stringify(fields, null, 2);
+      var docId = (data.document_id && data.document_id.trim()) ? data.document_id.trim() : 'default';
+      document.getElementById('loadedDocumentId').value = docId;
+      updateIdpTargetLine(docId);
+      var hint = document.getElementById('idpTargetLine');
+      if (hint && docId.indexOf('enrollment-') !== 0 && (docId.toLowerCase().indexOf('aletheon') >= 0 || docId.toLowerCase().indexOf('theloryx') >= 0)) {
+        hint.textContent = (hint.textContent || '') + ' — maps to enrollment-theloryx-1 for IDP extract';
+      } else if (hint && docId.indexOf('enrollment-') !== 0 && (docId.toLowerCase().indexOf('somatuline') >= 0 || docId.toLowerCase().indexOf('ipsen') >= 0)) {
+        hint.textContent = (hint.textContent || '') + ' — maps to enrollment-somatuline-1 for IDP extract';
+      }
+    };
+
+    async function updateIdpTargetLine(documentId) {
+      var el = document.getElementById('idpTargetLine');
+      if (!el) return;
+      if (!documentId || documentId === 'default') {
+        el.style.display = 'none';
+        el.textContent = '';
+        return;
+      }
+      try {
+        var r = await fetch('/api/idp/execution-target?document_id=' + encodeURIComponent(documentId));
+        var meta = await r.json();
+        var t = meta.target || {};
+        el.style.display = 'block';
+        var oauth = meta.oauth || {};
+        el.textContent = 'IDP target: ' + (t.platform || '?') + ' · org ' + (t.org_id || '?') + ' · action ' + (t.action_version || '?')
+          + (oauth.client_id_prefix ? ' · OAuth ' + oauth.client_id_prefix : '')
+          + (meta.warnings && meta.warnings.length ? ' — ' + meta.warnings.join(' ') : '');
+        el.style.color = (meta.warnings && meta.warnings.length) ? '#d29922' : 'var(--text-muted)';
+      } catch (e) {
+        el.style.display = 'none';
+      }
+    }
+
+    function flattenNestedFieldsToValueMap(obj, prefix) {
+      prefix = prefix || '';
+      var out = {};
+      if (obj === null || obj === undefined) return out;
+      if (typeof obj !== 'object' || Array.isArray(obj)) {
+        if (prefix) out[prefix] = { value: obj };
+        return out;
+      }
+      var keys = Object.keys(obj);
+      if (keys.length === 1 && keys[0] === 'value') {
+        var inner = obj.value;
+        if (inner !== null && typeof inner === 'object' && !Array.isArray(inner) && (Object.keys(inner).length !== 1 || !('value' in inner))) {
+          var sub = flattenNestedFieldsToValueMap(inner, prefix);
+          for (var sk in sub) { if (sub.hasOwnProperty(sk)) out[sk] = sub[sk]; }
+        } else {
+          if (prefix) out[prefix] = { value: inner };
+        }
+        return out;
+      }
+      for (var i = 0; i < keys.length; i++) {
+        var k = keys[i];
+        var v = obj[k];
+        var p = prefix ? prefix + '.' + k : k;
+        if (v !== null && typeof v === 'object' && !Array.isArray(v) && (Object.keys(v).length !== 1 || !('value' in v))) {
+          var sub = flattenNestedFieldsToValueMap(v, p);
+          for (var sk in sub) { if (sub.hasOwnProperty(sk)) out[sk] = sub[sk]; }
+        } else {
+          if (v !== null && typeof v === 'object' && v !== null && Object.keys(v).length === 1 && 'value' in v && typeof v.value === 'object' && v.value !== null && !Array.isArray(v.value)) {
+            var subInner = flattenNestedFieldsToValueMap(v.value, p);
+            for (var sk in subInner) { if (subInner.hasOwnProperty(sk)) out[sk] = subInner[sk]; }
+          } else {
+            var val = (v !== null && typeof v === 'object' && v !== null && 'value' in v) ? v : { value: v };
+            out[p] = val;
+          }
+        }
+      }
+      return out;
+    }
+    function tryParseJsonObject(str) {
+      if (typeof str !== 'string' || str.trim().indexOf('{') !== 0) return null;
+      try {
+        var p = JSON.parse(str);
+        return (p !== null && typeof p === 'object' && !Array.isArray(p)) ? p : null;
+      } catch (e) { return null; }
+    }
+    function unwrapJsonStrings(obj) {
+      if (typeof obj === 'string') return tryParseJsonObject(obj) || obj;
+      if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) return obj;
+      var out = {};
+      for (var k in obj) {
+        if (!obj.hasOwnProperty(k)) continue;
+        out[k] = unwrapJsonStrings(obj[k]);
+      }
+      return out;
+    }
+    function getFieldsFromBody(body) {
+      if (!body || typeof body !== 'object') return { fields: {}, tables: {} };
+      var metaKeys = { status: 1, id: 1, executionId: 1, execution: 1, documentName: 1, documentId: 1, result: 1, fields: 1, tables: 1, extractionResult: 1, extractionResults: 1 };
+      var f = body.fields || (body.result && body.result.fields) || (body.execution && body.execution.result && body.execution.result.fields) || (body.execution && body.execution.fields) || body.extractionResult || body.extractionResults || {};
+      if (typeof f === 'string') { try { f = JSON.parse(f); } catch (e) { f = {}; } }
+      f = unwrapJsonStrings(f);
+      var t = body.tables || (body.result && body.result.tables) || (body.execution && body.execution.result && body.execution.result.tables) || (body.execution && body.execution.tables) || {};
+      if (typeof f === 'object' && f !== null && !Array.isArray(f)) {
+        var arrKeys = ['fieldResults', 'extractionResults', 'results', 'fields'];
+        for (var i = 0; i < arrKeys.length; i++) {
+          if (Array.isArray(f[arrKeys[i]])) { f = f[arrKeys[i]]; break; }
+        }
+      }
+      if (Array.isArray(f)) {
+        var out = {};
+        f.forEach(function(item) {
+          var name = item.name || item.fieldName || item.key || item.id;
+          var val = item.value != null ? item.value : (item.values && item.values[0]);
+          if (name != null) out[name] = typeof val === 'object' && val !== null && 'value' in val ? val : { value: val };
+        });
+        f = out;
+      }
+      if (typeof f !== 'object' || f === null) f = {};
+      if (typeof t !== 'object' || t === null) t = {};
+      if (Object.keys(f).length === 0 && typeof body === 'object') {
+        for (var k in body) {
+          if (metaKeys[k] || !body.hasOwnProperty(k)) continue;
+          var v = body[k];
+          if (v !== null && typeof v === 'object' && !Array.isArray(v)) f[k] = v;
+          else f[k] = { value: v };
+        }
+      }
+      var allNested = Object.keys(f).length > 0 && Object.keys(f).every(function(k) {
+        var v = f[k];
+        return v !== null && typeof v === 'object' && !Array.isArray(v);
+      });
+      if (allNested) {
+        var flat = {};
+        for (var sec in f) {
+          if (!f.hasOwnProperty(sec)) continue;
+          var sub = flattenNestedFieldsToValueMap(f[sec], sec);
+          for (var sk in sub) { if (sub.hasOwnProperty(sk)) flat[sk] = sub[sk]; }
+        }
+        f = flat;
+      }
+      return { fields: f, tables: t };
+    }
+
+    /** Saved ground truth from Extract & Edit is often { fields: {...}, tables: {...} }; compare expects the inner field map. */
+    function expectedPayloadForRun(obj) {
+      if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return obj;
+      var keys = Object.keys(obj);
+      if (keys.length === 0) return obj;
+      var onlyFieldsAndTables = keys.every(function(k) { return k === 'fields' || k === 'tables'; });
+      if (onlyFieldsAndTables && obj.fields && typeof obj.fields === 'object' && !Array.isArray(obj.fields)) {
+        return obj.fields;
+      }
+      return obj;
+    }
+
+    document.getElementById('sendToIdpBtn').onclick = async function() {
+      var msgEl = document.getElementById('sendToIdpMsg');
+      var btn = document.getElementById('sendToIdpBtn');
+      msgEl.textContent = '';
+      msgEl.style.color = '';
+
+      var expectedRaw = document.getElementById('expected').value.trim();
+      if (!expectedRaw) {
+        msgEl.textContent = 'Load a saved ground truth into Expected above, or paste expected JSON.';
+        msgEl.style.color = 'var(--error)';
+        return;
+      }
+      var expectedJson;
+      try {
+        expectedJson = JSON.parse(expectedRaw);
+      } catch (e) {
+        msgEl.textContent = 'Expected JSON is invalid: ' + e.message;
+        msgEl.style.color = 'var(--error)';
+        return;
+      }
+      if (typeof expectedJson !== 'object' || expectedJson === null || Array.isArray(expectedJson)) {
+        msgEl.textContent = 'Expected must be a JSON object.';
+        msgEl.style.color = 'var(--error)';
+        return;
+      }
+
+      var fileInput = document.getElementById('idpDocFile');
+      if (!fileInput || !fileInput.files || !fileInput.files.length) {
+        msgEl.textContent = 'Please choose a document (PDF or image).';
+        msgEl.style.color = 'var(--error)';
+        return;
+      }
+
+      var creds;
+      var docId = document.getElementById('loadedDocumentId').value.trim() || 'default';
+      var targetMeta = {};
+      try {
+        var tr = await fetch('/api/idp/execution-target?document_id=' + encodeURIComponent(docId));
+        targetMeta = await tr.json().catch(function() { return {}; });
+      } catch (e) { targetMeta = {}; }
+      var oauth = targetMeta.oauth || {};
+      var targetWarnings = targetMeta.warnings || [];
+      if (docId !== 'default' && oauth.needed_platform === 'production' && targetWarnings.length) {
+        var block = targetWarnings.some(function(w) {
+          return w.indexOf('staging OAuth') >= 0 || w.indexOf('No Connected App saved for platform') >= 0;
+        });
+        if (block) {
+          msgEl.textContent = targetWarnings.join(' ');
+          msgEl.style.color = 'var(--error)';
+          return;
+        }
+      }
+      try {
+        var cr = await fetch('/api/settings/idp-credentials');
+        creds = await cr.json().catch(function() { return {}; });
+      } catch (e) {
+        msgEl.textContent = 'Could not load credentials: ' + e.message;
+        msgEl.style.color = 'var(--error)';
+        return;
+      }
+      var needPlatform = (oauth.needed_platform || 'production').trim() || 'production';
+      var bp = creds.by_platform || {};
+      var platCreds = bp[needPlatform] || {};
+      var clientId = (platCreds.client_id || creds.client_id || '').trim();
+      var clientSecret = (platCreds.client_secret || creds.client_secret || '').trim();
+      if (!clientId || !clientSecret) {
+        msgEl.textContent = 'Save ' + needPlatform + ' Connected App credentials on Extract & Edit '
+          + '(set Platform to «' + (needPlatform === 'production' ? 'Production (US)' : needPlatform) + '», then Save credentials).';
+        msgEl.style.color = 'var(--error)';
+        return;
+      }
+
+      btn.disabled = true;
+      msgEl.textContent = 'Sending to IDP…';
+
+      var fd = new FormData();
+      fd.append('file', fileInput.files[0]);
+      fd.append('document_id', docId);
+      fd.append('client_id', clientId);
+      fd.append('client_secret', clientSecret);
+
+      var extractRes;
+      try {
+        extractRes = await fetch('/api/idp/extract', { method: 'POST', body: fd });
+      } catch (e) {
+        msgEl.textContent = 'Request failed: ' + e.message;
+        msgEl.style.color = 'var(--error)';
+        btn.disabled = false;
+        return;
+      }
+
+      var data = await extractRes.json().catch(function() { return {}; });
+      var status = (data.status || '').toUpperCase();
+      var hasResult = data.body && typeof data.body === 'object';
+      var showResult = data.ok || (hasResult && (status === 'MANUAL_VALIDATION_REQUIRED' || status === 'PARTIAL_SUCCESS'));
+
+      if (!showResult) {
+        var errMsg = data.error || data.detail || data.status || ('HTTP ' + extractRes.status);
+        if (data.request_id) errMsg += ' — request_id: ' + data.request_id;
+        if (data.log_file) errMsg += ' — log: ' + data.log_file;
+        msgEl.textContent = 'IDP error: ' + errMsg;
+        msgEl.style.color = 'var(--error)';
+        btn.disabled = false;
+        return;
+      }
+
+      var targetNote = '';
+      if (data.idp_target) {
+        targetNote = ' [' + (data.idp_target.platform || '') + ' v' + (data.idp_target.action_version || '') + ']';
+      }
+      if (data.idp_target_warnings && data.idp_target_warnings.length) {
+        targetNote += ' ' + data.idp_target_warnings[0];
+      }
+
+      var body = data.body || data;
+      if (!body || typeof body !== 'object') body = data;
+      var extracted = (data.extracted_fields && typeof data.extracted_fields === 'object' && Object.keys(data.extracted_fields).length)
+        ? { fields: data.extracted_fields }
+        : getFieldsFromBody(body);
+      var idpFields = extracted.fields;
+
+      var docId = document.getElementById('loadedDocumentId').value.trim() || 'default';
+      // Only treat as multi-document when top-level keys are clearly document IDs (e.g. "default", "Form-1"), not field names.
+      // A flat field set like { "state": {"value":"NC"}, "name": {"value":"John"} } has object values too – do NOT pick one key as "doc".
+      if (idpFields && typeof idpFields === 'object' && !Array.isArray(idpFields)) {
+        var keys = Object.keys(idpFields);
+        function isDocIdLike(k) {
+          var lower = (k || '').toLowerCase();
+          return lower === 'default' || lower === 'form-1' || lower === 'form_1' || lower === 'document' || /^doc[-_]?\d*$/.test(lower);
+        }
+        var looksLikeDocIds = keys.length >= 1 && keys.length <= 5 && keys.every(isDocIdLike);
+        var allValuesAreObjects = keys.length > 0 && keys.every(function(k) {
+          var v = idpFields[k];
+          return v !== null && typeof v === 'object' && !Array.isArray(v);
+        });
+        if (looksLikeDocIds && allValuesAreObjects) {
+          function countFields(obj) {
+            if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return 0;
+            return Object.keys(obj).length;
+          }
+          var bestKey = keys[0];
+          var bestCount = countFields(idpFields[bestKey]);
+          for (var i = 0; i < keys.length; i++) {
+            var c = countFields(idpFields[keys[i]]);
+            if (c > bestCount) { bestKey = keys[i]; bestCount = c; }
+          }
+          var byPreference = [docId, 'default'].filter(function(k) { return keys.indexOf(k) >= 0; });
+          for (var j = 0; j < byPreference.length; j++) {
+            if (countFields(idpFields[byPreference[j]]) > 0) { bestKey = byPreference[j]; break; }
+          }
+          idpFields = idpFields[bestKey] || idpFields;
+        }
+      }
+
+      // If the chosen document is nested as { "fields": { "state": "NC", ... } }, use the inner field set
+      // so paths match expected (e.g. "state") instead of "fields.state".
+      if (idpFields && typeof idpFields === 'object' && !Array.isArray(idpFields) && idpFields.fields && typeof idpFields.fields === 'object' && !Array.isArray(idpFields.fields)) {
+        idpFields = idpFields.fields;
+      }
+
+      // Always send exactly one document: our loaded ground truth docId. Never add "default" or other keys.
+      var expectedDocs = {};
+      var idpDocs = {};
+      var idpBodies = {};
+      expectedDocs[docId] = expectedPayloadForRun(expectedJson);
+      var idpPayload = idpFields;
+      if (idpFields && typeof idpFields === 'object' && idpFields.fields && typeof idpFields.fields === 'object' && !Array.isArray(idpFields.fields)) {
+        idpPayload = idpFields.fields;
+      }
+      idpDocs[docId] = idpPayload;
+      if (body && typeof body === 'object') idpBodies[docId] = body;
+
+      var label = document.getElementById('label').value.trim() || null;
+      var runRes;
+      try {
+        runRes = await fetch('/api/runs/from-json', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ expected: expectedDocs, idp: idpDocs, idp_bodies: idpBodies, label }),
+        });
+      } catch (e) {
+        msgEl.textContent = 'Run creation failed: ' + e.message;
+        msgEl.style.color = 'var(--error)';
+        btn.disabled = false;
+        return;
+      }
+
+      if (!runRes.ok) {
+        var errText = await runRes.text();
+        msgEl.textContent = 'Run creation failed: ' + errText;
+        msgEl.style.color = 'var(--error)';
+        btn.disabled = false;
+        return;
+      }
+
+      var runData = await runRes.json();
+      var warn = (runData.warnings && runData.warnings.length) ? (' Warning: ' + runData.warnings.join(' ')) : '';
+      msgEl.textContent = 'Run created' + targetNote + '. Opening comparison…' + warn;
+      msgEl.style.color = (runData.warnings && runData.warnings.length) ? '#d29922' : 'var(--success)';
+      window.location.href = '/runs/' + runData.id;
+    };
+
+    document.getElementById('form').onsubmit = async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById('msg');
+      msg.textContent = '';
+      msg.style.color = '';
+
+      let expectedJson, idpJson;
+      try {
+        const expectedRaw = document.getElementById('expected').value.trim();
+        const idpRaw = document.getElementById('idp').value.trim();
+        if (!expectedRaw || !idpRaw) {
+          msg.textContent = 'Please paste both JSON objects.';
+          msg.style.color = 'var(--error)';
+          return;
+        }
+        expectedJson = JSON.parse(expectedRaw);
+        idpJson = JSON.parse(idpRaw);
+        expectedJson = expectedPayloadForRun(expectedJson);
+      } catch (err) {
+        msg.textContent = 'Invalid JSON: ' + err.message;
+        msg.style.color = 'var(--error)';
+        return;
+      }
+      if (typeof expectedJson !== 'object' || expectedJson === null || Array.isArray(expectedJson)) {
+        msg.textContent = 'Expected must be a JSON object.';
+        msg.style.color = 'var(--error)';
+        return;
+      }
+      if (typeof idpJson !== 'object' || idpJson === null || Array.isArray(idpJson)) {
+        msg.textContent = 'IDP result must be a JSON object.';
+        msg.style.color = 'var(--error)';
+        return;
+      }
+
+      // If pasted JSON is a single document (flat field object), wrap as { "default": ... }
+      function isBulkShape(obj) {
+        const values = Object.values(obj);
+        if (values.length === 0) return false;
+        return values.every(v => typeof v === 'object' && v !== null && !Array.isArray(v));
+      }
+      if (!isBulkShape(expectedJson)) expectedJson = { default: expectedJson };
+      if (!isBulkShape(idpJson)) idpJson = { default: idpJson };
+
+      const label = document.getElementById('label').value.trim() || null;
+      const r = await fetch('/api/runs/from-json', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expected: expectedJson, idp: idpJson, label }),
+      });
+
+      if (!r.ok) {
+        const t = await r.text();
+        msg.textContent = 'Request failed: ' + t;
+        msg.style.color = 'var(--error)';
+        return;
+      }
+
+      const data = await r.json();
+      var warnHtml = (data.warnings && data.warnings.length)
+        ? '<p style="color:#d29922;font-size:0.875rem;margin-top:8px;">' + data.warnings.join('<br>') + '</p>'
+        : '';
+      msg.innerHTML = 'Run #' + data.id + ' created. <a href="/runs/' + data.id + '" style="color: var(--accent);">View results →</a>' + warnHtml;
+      msg.style.color = 'var(--success)';
+    };
+  </script>
+</body>
+</html>

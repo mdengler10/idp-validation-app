@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Expected data – IDP Validation</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app-wrap">
+    <h1>Expected data</h1>
+    <p class="subtitle">Optionally pre-load expected (ground truth) documents. You can also paste them in the New run page.</p>
+    <nav class="nav">
+      <a href="/">Home</a>
+      <a href="/runs">Runs</a>
+      <a href="/runs/new">New run</a>
+      <a href="/extract-edit">Extract & Edit</a>
+    </nav>
+    <div class="card" style="margin-bottom: 20px; border-left: 4px solid var(--accent);">
+      <div class="card-header">Build ground truth from PDF enrollment forms?</div>
+      <p style="margin: 0 0 12px 0; font-size: 0.9375rem; color: var(--text);">Use <strong><a href="/extract-edit">Extract & Edit</a></strong> to upload a <strong>PDF or image</strong>, run IDP extraction, correct the fields, and save as a named document. Then load that document into the Expected field on the New run page. This page below is for uploading existing JSON only.</p>
+    </div>
+    <div class="card">
+      <div class="card-header">Upload expected data as JSON only (not PDF)</div>
+      <p style="margin: 0 0 8px 0; font-size: 0.875rem; color: var(--text-muted);">File must be a .json file: object keyed by document_id.</p>
+      <pre style="background: var(--bg-input); padding: 12px; border-radius: var(--radius-sm); font-size: 0.8125rem; margin: 0 0 12px 0; overflow-x: auto;">{"doc-1": {"invoiceDate": "2025-03-13", "amount": "1234.56"}, "doc-2": {...}}</pre>
+      <form id="uploadForm">
+        <input type="file" name="file" accept=".json,application/json" required style="margin-bottom: 12px;">
+        <button type="submit" class="btn btn-primary">Upload JSON</button>
+      </form>
+      <p id="uploadMsg" style="margin: 12px 0 0 0; font-size: 0.9375rem;"></p>
+    </div>
+    <h2>Loaded documents ({{ docs|length }})</h2>
+    {% if docs %}
+    <div class="card">
+      <ul style="margin: 0; padding-left: 20px;">
+        {% for d in docs %}
+        <li style="margin-bottom: 4px;">{{ d.document_id }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% else %}
+    <p style="color: var(--text-muted);">None yet. Upload a file above or paste in New run.</p>
+    {% endif %}
+  </div>
+  <script>
+    document.getElementById('uploadForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const r = await fetch('/api/expected/upload', { method: 'POST', body: fd });
+      const msg = document.getElementById('uploadMsg');
+      if (r.ok) { const j = await r.json(); msg.textContent = 'Loaded ' + j.count + ' document(s).'; msg.style.color = 'var(--success)'; location.reload(); }
+      else { msg.textContent = 'Upload failed: ' + await r.text(); msg.style.color = 'var(--error)'; }
+    };
+  </script>
+</body>
+</html>

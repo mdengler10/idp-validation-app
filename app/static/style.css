@@ -1,0 +1,458 @@
+/* IDP Validation – modern UI */
+:root {
+  --bg: #0f1419;
+  --bg-card: #1a2332;
+  --bg-input: #252d3a;
+  --border: #2d3a4d;
+  --text: #e6edf3;
+  --text-muted: #8b949e;
+  --accent: #58a6ff;
+  --accent-hover: #79b8ff;
+  --success: #3fb950;
+  --success-bg: rgba(63, 185, 80, 0.15);
+  --error: #f85149;
+  --error-bg: rgba(248, 81, 73, 0.15);
+  --radius: 10px;
+  --radius-sm: 6px;
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+  --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  margin: 0;
+  min-height: 100vh;
+}
+
+.app-wrap {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px 20px;
+}
+
+/* Typography */
+h1 {
+  font-size: 1.75rem;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+  letter-spacing: -0.02em;
+}
+
+h2 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin: 0 0 16px 0;
+}
+
+.subtitle {
+  color: var(--text-muted);
+  font-size: 0.9375rem;
+  margin-bottom: 24px;
+}
+
+/* Nav */
+.nav {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 32px;
+  flex-wrap: wrap;
+}
+
+.nav a {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.9375rem;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s, color 0.15s;
+}
+
+.nav a:hover {
+  background: var(--bg-input);
+  color: var(--accent-hover);
+}
+
+/* Cards */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow);
+}
+
+.card-header {
+  font-weight: 600;
+  font-size: 0.9375rem;
+  margin-bottom: 12px;
+  color: var(--text-muted);
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 18px;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.05s;
+  font-family: inherit;
+  text-decoration: none;
+  color: inherit;
+}
+
+.btn:active {
+  transform: scale(0.98);
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.btn-ghost:hover {
+  background: var(--bg-input);
+  color: var(--text);
+}
+
+.btn-danger {
+  background: var(--error-bg);
+  color: var(--error);
+  border: 1px solid rgba(248, 81, 73, 0.4);
+}
+
+.btn-danger:hover {
+  background: rgba(248, 81, 73, 0.25);
+}
+
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 0.8125rem;
+}
+
+/* JSON panels (Postman-style) */
+.json-panels {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+@media (max-width: 800px) {
+  .json-panels {
+    grid-template-columns: 1fr;
+  }
+}
+
+.json-panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+
+.json-panel label {
+  padding: 12px 16px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  background: var(--bg-input);
+  border-bottom: 1px solid var(--border);
+}
+
+.json-panel.left label { border-left: 3px solid var(--success); }
+.json-panel.right label { border-left: 3px solid var(--accent); }
+
+.json-panel textarea {
+  flex: 1;
+  min-height: 280px;
+  padding: 16px;
+  font-family: "SF Mono", "Monaco", "Inconsolata", "Fira Code", monospace;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  background: var(--bg-input);
+  color: var(--text);
+  border: none;
+  resize: vertical;
+  outline: none;
+}
+
+.json-panel textarea::placeholder {
+  color: var(--text-muted);
+  opacity: 0.8;
+}
+
+/* Runs list table */
+.runs-table-wrap {
+  overflow-x: auto;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  box-shadow: var(--shadow);
+}
+
+.runs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+}
+
+.runs-table th,
+.runs-table td {
+  text-align: left;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.runs-table th {
+  font-weight: 600;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.runs-table tr:last-child td {
+  border-bottom: none;
+}
+
+.runs-table tbody tr {
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.runs-table tbody tr:hover {
+  background: var(--bg-input);
+}
+
+.runs-table .run-id {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.runs-table .success-rate {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.runs-table .success-rate.pass {
+  color: var(--success);
+}
+
+.runs-table .success-rate.fail {
+  color: var(--error);
+}
+
+.runs-table .success-rate.empty {
+  color: var(--text-muted);
+}
+
+/* Run detail: side-by-side field comparison */
+.compare-doc {
+  margin-bottom: 32px;
+}
+
+.compare-doc-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.compare-doc-title .badge {
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+
+.compare-doc-title .badge.pass {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.compare-doc-title .badge.fail {
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.field-rows {
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  background: var(--bg-card);
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 0;
+  align-items: stretch;
+  min-height: 52px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9375rem;
+}
+
+.field-row:last-child {
+  border-bottom: none;
+}
+
+.field-cell {
+  padding: 14px 18px;
+  word-break: break-word;
+}
+
+.field-cell.left {
+  background: rgba(63, 185, 80, 0.06);
+  border-right: 1px solid var(--border);
+}
+
+.field-cell.right {
+  background: rgba(88, 166, 255, 0.06);
+  border-left: 1px solid var(--border);
+}
+
+.field-name {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.field-value {
+  font-family: "SF Mono", Monaco, monospace;
+  font-size: 0.875rem;
+  color: var(--text);
+}
+
+.field-mid {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px;
+  background: var(--bg-input);
+}
+
+.field-mid .icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.field-mid .icon.pass {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.field-mid .icon.fail {
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.field-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Run detail summary */
+.run-summary {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+  padding: 16px 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.run-summary .stat {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+.run-summary .stat strong {
+  color: var(--text);
+  font-size: 1.125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Empty state */
+.empty-state {
+  text-align: center;
+  padding: 48px 24px;
+  color: var(--text-muted);
+}
+
+.empty-state p {
+  margin: 0 0 16px 0;
+  font-size: 0.9375rem;
+}
+
+/* Form row */
+.form-row {
+  margin-bottom: 16px;
+}
+
+.form-row label {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.form-row input[type="text"] {
+  width: 100%;
+  max-width: 320px;
+  padding: 10px 14px;
+  font-size: 0.9375rem;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  outline: none;
+}
+
+.form-row input:focus {
+  border-color: var(--accent);
+}

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IDP Validation App</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app-wrap">
+    <h1>IDP Validation App</h1>
+    <p class="subtitle">Validate IDP extraction vs expected ground truth. Fuzzy matching (REQ-1) and manual overrides (REQ-2).</p>
+    <nav class="nav">
+      <a href="/suite">AssistRx Test Suite</a>
+      <a href="/extract-edit">Extract & Edit (PDF → ground truth)</a>
+      <a href="/saved-ground-truth">Saved Ground Truth</a>
+      <a href="/upload-form">Upload Form</a>
+      <a href="/runs/new">New run</a>
+      <a href="/runs">Runs</a>
+      <a href="/expected">Expected data (JSON)</a>
+    </nav>
+    <div class="card">
+      <h2>Quick start</h2>
+      <ol style="margin: 0; padding-left: 20px; color: var(--text-muted); font-size: 0.9375rem;">
+        <li style="margin-bottom: 8px;"><strong style="color: var(--text);">AssistRx Test Suite</strong> – Open <a href="/suite">/suite</a> for reference documents (enrollment, insurance, copay). Set ground truth per PDF, run IDP, and see field-level success % on the dashboard.</li>
+        <li style="margin-bottom: 8px;"><strong style="color: var(--text);">Extract & Edit</strong> – Upload a <strong>PDF enrollment form</strong> (or image), run IDP extraction, correct the extracted values, and save as ground truth. Then load that saved document into New run as Expected.</li>
+        <li style="margin-bottom: 8px;"><strong style="color: var(--text);">Upload Form</strong> – Send a form to your MuleSoft IDP Document Action (region, org, action ID, version); view and copy the JSON response.</li>
+        <li style="margin-bottom: 8px;"><strong style="color: var(--text);">New run</strong> – Paste expected (correct) JSON and IDP result JSON in the two panels, then compare. Or use “Load from saved” to pull in a document you saved from Extract & Edit.</li>
+        <li style="margin-bottom: 8px;"><strong style="color: var(--text);">Runs</strong> – View history with success rate per run. Click a row to see field-by-field comparison (expected ↔ ✓/✗ ↔ IDP).</li>
+        <li style="margin-bottom: 8px;"><strong style="color: var(--text);">Overrides</strong> – Mark any field as correct or incorrect; clear overrides as needed.</li>
+        <li><strong style="color: var(--text);">Reset</strong> – Clear all runs and metrics from the Runs page (expected data is kept).</li>
+      </ol>
+    </div>
+  </div>
+</body>
+</html>
